@@ -1,0 +1,13 @@
+# your environments/launchers (personal paths)
+data/
+
+# .NET build output
+bin/
+obj/
+publish/
+dist/
+dist-next/
+*.user
+.vs/
+
+node_modules/

@@ -1,0 +1,10 @@
+{
+  "name": "mc-dev-hub",
+  "private": true,
+  "description": "Launch, watch and manage all your local web projects from one page",
+  "scripts": {
+    "start": "node server/server.js",
+    "desktop": "dotnet run --project desktop/MCDevHub",
+    "build:exe": "dotnet publish desktop/MCDevHub -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o dist"
+  }
+}
