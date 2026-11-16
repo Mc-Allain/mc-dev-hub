@@ -1,0 +1,136 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MCDevHub.MainWindow"
+        Title="MC Dev Hub · Server"
+        Icon="avares://MCDevHub/Assets/icon.ico"
+        Width="620" Height="760" MinWidth="520" MinHeight="560"
+        WindowStartupLocation="CenterScreen">
+
+  <DockPanel>
+    <!-- Header -->
+    <Border DockPanel.Dock="Top" Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="18,14">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <Image Source="avares://MCDevHub/Assets/icon.png" Width="26" Height="26" VerticalAlignment="Center"/>
+        <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+          <TextBlock Text="MC Dev Hub" FontWeight="Bold" FontSize="15"/>
+          <TextBlock Classes="muted" FontSize="12" Text="Runs the server behind MC Dev Hub"/>
+        </StackPanel>
+        <Border Grid.Column="2" CornerRadius="999" Padding="10,4" Background="{DynamicResource Panel2}" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="7">
+            <Ellipse x:Name="StatusDot" Width="9" Height="9" Fill="{DynamicResource Line}" VerticalAlignment="Center"/>
+            <TextBlock x:Name="StatusText" Text="Stopped" FontSize="12.5" VerticalAlignment="Center"/>
+          </StackPanel>
+        </Border>
+      </Grid>
+    </Border>
+
+    <ScrollViewer>
+      <StackPanel Margin="18" Spacing="14">
+
+        <!-- Notice -->
+        <Border x:Name="NoticeBox" IsVisible="False" Background="{DynamicResource ErrBg}" CornerRadius="6" Padding="10,8">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock x:Name="NoticeText" TextWrapping="Wrap" Foreground="{DynamicResource Danger}"/>
+            <Button Grid.Column="1" Content="✕" Padding="6,0" Background="Transparent" Click="DismissNotice" VerticalAlignment="Top"/>
+          </Grid>
+        </Border>
+
+        <!-- Main actions -->
+        <Border Classes="card" Padding="14">
+          <StackPanel Spacing="12">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Spacing="2">
+                <TextBlock Classes="h" Text="Launcher"/>
+                <TextBlock x:Name="UrlText" Classes="muted" FontSize="12.5" Text="http://localhost:4800"/>
+              </StackPanel>
+              <Button Grid.Column="1" x:Name="OpenUiButton" Classes="accent" Content="Open MC Dev Hub" Click="OpenUiClick" VerticalAlignment="Center"/>
+            </Grid>
+            <WrapPanel Orientation="Horizontal">
+              <Button x:Name="StartStopButton" Classes="go" Content="▶ Start server" Click="StartStopClick" Margin="0,0,8,0"/>
+              <Button x:Name="RestartButton" Classes="ghost" Content="↻ Restart" Click="RestartClick" Margin="0,0,8,0"/>
+              <Button x:Name="BrowserButton" Classes="ghost" Content="Open in browser" Click="BrowserClick" Margin="0,0,8,0"/>
+              <Button Classes="ghost" Content="Quit" Click="QuitClick"/>
+            </WrapPanel>
+          </StackPanel>
+        </Border>
+
+        <!-- Settings -->
+        <Border Classes="card" Padding="14">
+          <StackPanel Spacing="12">
+            <TextBlock Classes="h" Text="Settings"/>
+
+            <Grid ColumnDefinitions="130,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="10">
+              <TextBlock Text="Port" VerticalAlignment="Center" Classes="muted"/>
+              <NumericUpDown Grid.Column="1" x:Name="PortBox" Minimum="1" Maximum="65535" Increment="1" FormatString="0" Width="140" HorizontalAlignment="Left"/>
+
+              <TextBlock Grid.Row="1" Text="Open UI in" VerticalAlignment="Center" Classes="muted"/>
+              <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="16">
+                <RadioButton x:Name="ModeWindow" GroupName="mode" Content="App window"/>
+                <RadioButton x:Name="ModeBrowser" GroupName="mode" Content="Default browser"/>
+              </StackPanel>
+
+              <TextBlock Grid.Row="2" Text="Theme" VerticalAlignment="Center" Classes="muted"/>
+              <ComboBox Grid.Row="2" Grid.Column="1" x:Name="ThemeBox" Width="140">
+                <ComboBoxItem Content="System"/>
+                <ComboBoxItem Content="Light"/>
+                <ComboBoxItem Content="Dark"/>
+              </ComboBox>
+            </Grid>
+
+            <StackPanel Spacing="2">
+              <CheckBox x:Name="StartServerBox" Content="Start the server when this app opens"/>
+              <CheckBox x:Name="OpenUiBox" Content="Open the UI once the server is running"/>
+              <CheckBox x:Name="StartWithSystemBox" Content="Start with Windows (in the tray)"/>
+              <CheckBox x:Name="CloseToTrayBox" Content="Closing this window keeps it running in the tray"/>
+            </StackPanel>
+
+            <TextBlock Classes="h" Text="Paths" Margin="0,6,0,0"/>
+              <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8" ColumnSpacing="8">
+                <TextBlock Text="Node.js" VerticalAlignment="Center" Classes="muted"/>
+                <TextBox Grid.Column="1" x:Name="NodeBox" FontFamily="Cascadia Mono,Consolas,monospace" FontSize="12"/>
+                <Button Grid.Column="2" Classes="ghost" Content="Browse…" Click="BrowseNode"/>
+
+                <TextBlock Grid.Row="1" Text="Server folder" VerticalAlignment="Center" Classes="muted"/>
+                <TextBox Grid.Row="1" Grid.Column="1" x:Name="ServerBox" FontFamily="Cascadia Mono,Consolas,monospace" FontSize="12"/>
+                <Button Grid.Row="1" Grid.Column="2" Classes="ghost" Content="Browse…" Click="BrowseServer"/>
+
+                <TextBlock Grid.Row="2" Text="Data folder" VerticalAlignment="Center" Classes="muted"/>
+                <TextBox Grid.Row="2" Grid.Column="1" x:Name="DataBox" FontFamily="Cascadia Mono,Consolas,monospace" FontSize="12"/>
+                <StackPanel Grid.Row="2" Grid.Column="2" Orientation="Horizontal" Spacing="6">
+                  <Button Classes="ghost" Content="Browse…" Click="BrowseData"/>
+                  <Button Classes="ghost" Content="Open" Click="OpenData"/>
+                </StackPanel>
+
+                <TextBlock Grid.Row="3" Grid.ColumnSpan="3" Classes="muted" FontSize="12" TextWrapping="Wrap"
+                           Text="The data folder holds config.json with your environments and launchers. Back it up or sync it to keep your setup."/>
+              </Grid>
+            
+
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+              <TextBlock x:Name="SaveHint" Classes="muted" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"/>
+              <Button Grid.Column="1" Classes="ghost" Content="Revert" Click="RevertClick"/>
+              <Button Grid.Column="2" Classes="accent" Content="Save" Click="SaveClick"/>
+            </Grid>
+          </StackPanel>
+        </Border>
+
+        <!-- Log -->
+        <Border Classes="card" ClipToBounds="True">
+          <DockPanel>
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Background="{DynamicResource Panel2}">
+              <TextBlock Classes="h" Text="Server log" Margin="14,9"/>
+              <Button Grid.Column="1" Content="Clear" Background="Transparent" Padding="10,4" Margin="6,0" Click="ClearLog"/>
+            </Grid>
+            <Border Background="{DynamicResource CodeBg}" Height="170">
+              <ScrollViewer x:Name="LogScroll">
+                <SelectableTextBlock x:Name="LogText" Margin="12,8" FontFamily="Cascadia Mono,Consolas,monospace" FontSize="12"
+                                     Foreground="{DynamicResource CodeText}" TextWrapping="Wrap"/>
+              </ScrollViewer>
+            </Border>
+          </DockPanel>
+        </Border>
+
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</Window>
