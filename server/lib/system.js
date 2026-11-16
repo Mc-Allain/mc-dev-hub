@@ -1,0 +1,241 @@
+// OS helpers: terminals, file manager, editor, browser, folder picker, ports, process trees.
+import { spawn, execFile } from 'node:child_process';
+import fs from 'node:fs';
+import net from 'node:net';
+import path from 'node:path';
+
+export const isWin = process.platform === 'win32';
+export const isMac = process.platform === 'darwin';
+
+export function run(file, args, opts = {}) {
+  return new Promise((resolve) => {
+    execFile(file, args, { windowsHide: true, maxBuffer: 8 * 1024 * 1024, ...opts }, (err, stdout, stderr) => {
+      resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: String(stdout || ''), stderr: String(stderr || ''), err });
+    });
+  });
+}
+
+// Fire-and-forget a program that should outlive this server.
+function launch(file, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { stdio: 'ignore', detached: !isWin, windowsHide: false, ...opts });
+    child.once('error', reject);
+    child.once('spawn', () => { child.unref(); resolve(); });
+  });
+}
+
+// Windows: open things through cmd's "start", which always shows the new window normally.
+// (This server usually runs without a console. Launching explorer/wt directly with the
+// hidden-window flag made their windows open invisibly.) Built verbatim so the quotes reach cmd untouched.
+function winShellStart(rest) {
+  const line = `/d /s /c "start "" ${rest}"`;
+  return launch(process.env.ComSpec || 'cmd.exe', [line], { windowsVerbatimArguments: true, windowsHide: true });
+}
+const winStart = (cwd, programAndArgs) => winShellStart(`/D "${cwd}" ${programAndArgs}`);
+
+const exists = (p) => { try { return fs.existsSync(p); } catch { return false; } };
+let wtPath;
+function findWindowsTerminal() {
+  if (wtPath !== undefined) return wtPath;
+  const candidate = path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WindowsApps', 'wt.exe');
+  wtPath = exists(candidate) ? candidate : null;
+  return wtPath;
+}
+function findGitBash() {
+  const roots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], path.join(process.env.LOCALAPPDATA || '', 'Programs')];
+  for (const r of roots) {
+    if (!r) continue;
+    const p = path.join(r, 'Git', 'git-bash.exe');
+    if (exists(p)) return p;
+  }
+  return null;
+}
+
+export function terminalChoices() {
+  if (isWin) {
+    const list = [{ id: 'auto', label: 'Default (Windows Terminal, else PowerShell)' }];
+    if (findWindowsTerminal()) list.push({ id: 'wt', label: 'Windows Terminal' });
+    list.push({ id: 'powershell', label: 'Windows PowerShell' }, { id: 'pwsh', label: 'PowerShell 7 (pwsh)' }, { id: 'cmd', label: 'Command Prompt' });
+    if (findGitBash()) list.push({ id: 'gitbash', label: 'Git Bash' });
+    return list;
+  }
+  if (isMac) return [{ id: 'auto', label: 'Terminal' }, { id: 'iterm', label: 'iTerm' }];
+  return [{ id: 'auto', label: 'Default terminal' }];
+}
+
+// ---------- shells for CLI tabs ----------
+let pwshPath;
+function findPwsh() {
+  if (pwshPath !== undefined) return pwshPath;
+  const dirs = (process.env.PATH || '').split(path.delimiter);
+  dirs.push(path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '7'));
+  pwshPath = dirs.map((d) => path.join(d, 'pwsh.exe')).find(exists) || null;
+  return pwshPath;
+}
+function findGitBashShell() {
+  const gb = findGitBash();
+  if (!gb) return null;
+  const p = path.join(path.dirname(gb), 'bin', 'bash.exe');
+  return exists(p) ? p : null;
+}
+
+export function cliShells() {
+  if (!isWin) return [{ id: 'sh', label: path.basename(process.env.SHELL || 'sh') }];
+  const list = [{ id: 'powershell', label: 'Windows PowerShell' }];
+  if (findPwsh()) list.push({ id: 'pwsh', label: 'PowerShell 7 (pwsh)' });
+  list.push({ id: 'cmd', label: 'Command Prompt' });
+  if (findGitBashShell()) list.push({ id: 'bash', label: 'Git Bash' });
+  return list;
+}
+
+/** How to run one command line in a shell: { file, args, verbatim } */
+export function cliShellCommand(shell, line) {
+  if (!isWin) return { file: process.env.SHELL || '/bin/sh', args: ['-c', line] };
+  if (shell === 'cmd') return { file: process.env.ComSpec || 'cmd.exe', args: [`/d /s /c "${line}"`], verbatim: true };
+  if (shell === 'bash' && findGitBashShell()) return { file: findGitBashShell(), args: ['-c', line] };
+  // PowerShell: UTF-8, errors as plain text on stderr (a redirected PowerShell otherwise writes them as XML),
+  // and the exit code of the last program (or 1 if a cmdlet failed)
+  const script = [
+    '[Console]::OutputEncoding=[Text.Encoding]::UTF8; $OutputEncoding=[Text.Encoding]::UTF8; $ProgressPreference="SilentlyContinue"; $__failed=$false',
+    `& {\n${line}\n} 2>&1 | ForEach-Object { if ($_ -is [System.Management.Automation.ErrorRecord]) { $__failed=$true; [Console]::Error.WriteLine($_.ToString()) } else { $_ } }`,
+    'if ($LASTEXITCODE) { exit $LASTEXITCODE } elseif ($__failed) { exit 1 }',
+  ].join('\n');
+  const file = shell === 'pwsh' && findPwsh() ? findPwsh() : 'powershell.exe';
+  return { file, args: ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-OutputFormat', 'Text', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')] };
+}
+
+export async function openTerminal(dir, choice = 'auto') {
+  if (!exists(dir)) throw new Error(`Folder not found: ${dir}`);
+  const cwd = path.resolve(dir);
+  if (isWin) {
+    const wt = findWindowsTerminal();
+    if ((choice === 'auto' || choice === 'wt') && wt) {
+      // wt chokes on a trailing backslash before its closing quote
+      return winStart(cwd, `"${wt}" -d "${cwd.replace(/\\+$/, '') || cwd}"`);
+    }
+    if (choice === 'pwsh') return winStart(cwd, 'pwsh.exe -NoLogo');
+    if (choice === 'cmd') return winStart(cwd, 'cmd.exe');
+    if (choice === 'gitbash') {
+      const gb = findGitBash();
+      if (gb) return winStart(cwd, `"${gb}" --cd="${cwd}"`);
+    }
+    return winStart(cwd, 'powershell.exe -NoLogo');
+  }
+  if (isMac) return launch('open', ['-a', choice === 'iterm' ? 'iTerm' : 'Terminal', cwd]);
+  return launch('x-terminal-emulator', [], { cwd });
+}
+
+export async function openFolder(dir) {
+  if (!exists(dir)) throw new Error(`Folder not found: ${dir}`);
+  if (isWin) return winShellStart(`"${path.resolve(dir)}"`);
+  if (isMac) return launch('open', [dir]);
+  return launch('xdg-open', [dir]);
+}
+
+export async function openEditor(dir, editor = 'code') {
+  if (!exists(dir)) throw new Error(`Folder not found: ${dir}`);
+  const cmd = String(editor || 'code').trim();
+  if (isWin) {
+    // through cmd so "code" resolves to code.cmd from PATH
+    return launch(process.env.ComSpec || 'cmd.exe', [`/d /s /c "${cmd} "${path.resolve(dir)}""`], { windowsVerbatimArguments: true, windowsHide: true });
+  }
+  return launch('/bin/sh', ['-c', `${cmd} "$0"`, dir]);
+}
+
+export async function openUrl(url) {
+  if (!/^https?:\/\//i.test(url)) throw new Error('Only http(s) URLs can be opened');
+  if (isWin) return launch('rundll32.exe', ['url.dll,FileProtocolHandler', url], { windowsHide: false });
+  if (isMac) return launch('open', [url]);
+  return launch('xdg-open', [url]);
+}
+
+const PS_PICK = `
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Application]::EnableVisualStyles()
+$owner = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true; ShowInTaskbar = $false; WindowState = 'Minimized' }
+$owner.Show(); $owner.Activate()
+$d = New-Object System.Windows.Forms.FolderBrowserDialog
+$d.Description = 'Select a folder'
+$d.ShowNewFolderButton = $true
+if ($env:MCDH_INITIAL -and (Test-Path -LiteralPath $env:MCDH_INITIAL)) { $d.SelectedPath = $env:MCDH_INITIAL }
+if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }
+$owner.Close()
+`;
+
+// Native folder dialog, used when the UI runs in a normal browser (the desktop app has its own).
+export async function pickFolder(initial = '') {
+  if (isWin) {
+    const r = await run('powershell.exe', ['-NoProfile', '-STA', '-NonInteractive', '-Command', PS_PICK], {
+      env: { ...process.env, MCDH_INITIAL: initial || '' }, timeout: 10 * 60 * 1000,
+    });
+    return r.stdout.trim() || null;
+  }
+  if (isMac) {
+    const r = await run('osascript', ['-e', 'POSIX path of (choose folder with prompt "Select a folder")'], { timeout: 10 * 60 * 1000 });
+    return r.code === 0 ? r.stdout.trim().replace(/\/$/, '') || '/' : null;
+  }
+  const r = await run('zenity', ['--file-selection', '--directory']);
+  return r.code === 0 ? r.stdout.trim() : null;
+}
+
+function tryConnect(host, port, timeout = 400) {
+  return new Promise((resolve) => {
+    const sock = net.connect({ host, port });
+    const done = (ok) => { sock.destroy(); resolve(ok); };
+    sock.setTimeout(timeout, () => done(false));
+    sock.once('connect', () => done(true));
+    sock.once('error', () => done(false));
+  });
+}
+
+// Dev servers bind to 127.0.0.1, ::1 or 0.0.0.0 depending on the tool, so check both loopbacks.
+export async function isPortOpen(port) {
+  const [v4, v6] = await Promise.all([tryConnect('127.0.0.1', port), tryConnect('::1', port)]);
+  return v4 || v6;
+}
+
+export async function portOwner(port) {
+  let pid = null;
+  if (isWin) {
+    const r = await run('netstat.exe', ['-ano', '-p', 'tcp']);
+    const r6 = await run('netstat.exe', ['-ano', '-p', 'tcpv6']);
+    for (const line of (r.stdout + '\n' + r6.stdout).split(/\r?\n/)) {
+      const cols = line.trim().split(/\s+/);
+      if (cols.length >= 5 && /LISTEN/i.test(cols[3]) && cols[1].endsWith(':' + port)) { pid = parseInt(cols[4], 10); break; }
+    }
+  } else {
+    const r = await run('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t']);
+    pid = parseInt(r.stdout.split('\n')[0], 10) || null;
+  }
+  if (!pid) return null;
+  let name = '';
+  if (isWin) {
+    const r = await run('tasklist.exe', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH']);
+    const m = r.stdout.match(/^"([^"]+)"/m);
+    name = m ? m[1] : '';
+  } else {
+    const r = await run('ps', ['-p', String(pid), '-o', 'comm=']);
+    name = path.basename(r.stdout.trim());
+  }
+  return { pid, name };
+}
+
+export async function killTree(pid) {
+  if (!pid) return;
+  if (isWin) {
+    await run('taskkill.exe', ['/pid', String(pid), '/T', '/F']);
+    return;
+  }
+  try { process.kill(-pid, 'SIGTERM'); } catch { try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ } }
+  await new Promise((r) => setTimeout(r, 1500));
+  try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
+}
+
+export function pathInfo(p) {
+  try {
+    const st = fs.statSync(p);
+    return { exists: true, isDir: st.isDirectory(), name: path.basename(path.resolve(p)) };
+  } catch {
+    return { exists: false, isDir: false, name: path.basename(p || '') };
+  }
+}

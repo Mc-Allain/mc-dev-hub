@@ -1,0 +1,12 @@
+{
+  "name": "mc-dev-hub-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local web UI that launches, monitors and manages your other local web projects",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": { "node": ">=20" }
+}

@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MC Dev Hub</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // apply saved theme before first paint
+    try { const t = JSON.parse(localStorage.getItem('mcdh.theme')); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img class="logo" src="icon.svg" alt="">MC Dev Hub</div>
+    <span class="grow"></span>
+    <span id="runningSummary" class="summary-pill"></span>
+    <button id="instancesBtn" class="ghost inst-btn" title="See and stop everything running: launchers and other dev servers">Instances ↗</button>
+    <div class="seg" id="themeSeg" title="Theme">
+      <button data-theme="system">System</button>
+      <button data-theme="light">Light</button>
+      <button data-theme="dark">Dark</button>
+    </div>
+    <button id="settingsBtn" class="ghost">Settings</button>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <button id="addEnvBtn" class="primary">+ Environment</button>
+      <input id="envFilter" type="search" placeholder="Filter…">
+      <ul id="envList" class="env-list"></ul>
+    </aside>
+
+    <main class="main">
+      <div id="emptyState" class="empty" hidden>
+        <h2>Add your first project</h2>
+        <p>An <b>environment</b> is one of your project folders. Each environment can have several <b>launchers</b>, for example <code>api</code>, <code>client</code> and <code>admin</code> in a monorepo.</p>
+        <div class="steps">1. Click <b>+ Environment</b> and choose a folder<br>2. Pick the launchers we detect (or add your own)<br>3. Press <b>Start</b> and watch the logs here</div>
+        <div><button class="primary" id="emptyAddBtn">+ Environment</button></div>
+      </div>
+
+      <section id="envView" hidden>
+        <div class="env-head">
+          <div class="env-title">
+            <h2><span id="envDot" class="dot"></span><span id="envName"></span></h2>
+            <div id="envPath" class="env-path mono"></div>
+          </div>
+          <div class="env-actions">
+            <button class="ghost" data-open="terminal" title="Open a terminal in this folder">⌨ Terminal</button>
+            <button class="ghost" data-open="folder" title="Open in file explorer">📁 Folder</button>
+            <button class="ghost" data-open="editor" title="Open in your editor">✎ Editor</button>
+            <button class="ghost" id="editEnvBtn">Edit</button>
+          </div>
+        </div>
+        <div id="envWarn" class="warn-box" hidden></div>
+
+        <nav class="tabs" id="tabs">
+          <button data-tab="launchers" class="active">Launchers <span class="count" id="launcherCount"></span></button>
+          <button data-tab="api" id="apiTabBtn" hidden>API <span class="count" id="apiBadge"></span></button>
+          <button data-tab="net" title="Network traffic of this environment's launchers">Network <span class="count" id="netBadge"></span></button>
+          <button data-tab="git">Git <span class="count" id="gitBadge"></span></button>
+        </nav>
+
+        <!-- Launchers -->
+        <div class="tab-body" id="tab-launchers">
+          <div class="toolbar">
+            <button class="go" id="startAllBtn">▶ Start all</button>
+            <button class="ghost" id="stopAllBtn">■ Stop all</button>
+            <span class="grow"></span>
+            <button class="ghost" id="detectBtn" title="Find dev scripts in package.json files">Detect launchers</button>
+            <button class="primary" id="addLauncherBtn">+ Launcher</button>
+          </div>
+          <div class="launcher-list" id="launcherList"></div>
+
+          <div class="con-area" id="conArea"></div>
+        </div>
+
+        <!-- API -->
+        <div class="tab-body" id="tab-api" hidden>
+          <div class="toolbar">
+            <select id="apiLauncher" title="API launcher"></select>
+            <span id="apiSource" class="muted small-text"></span>
+            <span class="grow"></span>
+            <button class="go small" id="apiStart" hidden>▶ Start API</button>
+            <button class="ghost small" id="apiNewBtn" title="A new request in the Custom list">＋ New</button>
+            <button class="ghost small" id="apiCurlBtn" title="Turn a curl command into a request (e.g. Copy as cURL from the browser's DevTools)">⧉ Paste cURL</button>
+            <button class="ghost small" id="apiAuthBtn" title="Headers sent with every request, e.g. Authorization">🔑 Auth &amp; headers <span id="apiAuthCount" class="count"></span></button>
+            <button class="ghost small" id="apiRescan" title="Read the routes again">↻ Rescan</button>
+          </div>
+          <div class="api-layout">
+            <aside class="api-side">
+              <nav class="tabs small api-lists" id="apiLists">
+                <button type="button" data-list="detected" title="Routes found in the code or the API's OpenAPI document">Detected <span class="count" id="apiCountDetected"></span></button>
+                <button type="button" data-list="custom" title="Your saved requests for this API">Custom <span class="count" id="apiCountCustom"></span></button>
+              </nav>
+              <input id="apiFilter" type="search" placeholder="Filter routes…">
+              <div id="apiRouteList" class="route-list"></div>
+            </aside>
+            <section class="api-main" id="apiMain"></section>
+          </div>
+        </div>
+
+        <!-- Git -->
+        <!-- Network -->
+        <div class="tab-body" id="tab-net" hidden>
+          <div class="toolbar">
+            <select id="netLauncher" title="Launcher"></select>
+            <div class="seg" id="netSrc" title="Where the traffic was captured">
+              <button data-src="">All</button>
+              <button data-src="server" title="Captured inside the launcher's server process">Server</button>
+              <button data-src="browser" title="Captured in the app's site window">Browser</button>
+            </div>
+            <input id="netSearch" type="search" placeholder="Filter: URL, host, method, status…" spellcheck="false">
+            <span class="grow"></span>
+            <button class="ghost small" id="netPause" title="Stop adding new traffic to the list">⏸ Pause</button>
+            <button class="ghost small" id="netClearBtn">Clear</button>
+          </div>
+          <div class="net-chips" id="netChips">
+            <button data-chip="api" title="Requests to your server (and from the page)">API calls</button>
+            <button data-chip="out" title="HTTP calls your server makes to other services">Outgoing</button>
+            <button data-chip="db" title="Database, cache and queue connections, WebSockets">Databases &amp; sockets</button>
+            <span class="sep"></span>
+            <button data-chip="static" title="Scripts, styles, images, fonts, pages">Static files</button>
+            <button data-chip="dev" title="Dev-server traffic: hot reload, /@vite, /_next/static, source maps">Dev server</button>
+            <button data-chip="health" title="/health, /ping, /ready…">Health checks</button>
+            <button data-chip="tcp" title="Other TCP connections, including the ones HTTP calls open">Other TCP</button>
+            <span class="sep"></span>
+            <button data-chip="errors" title="Only failed requests (status 400+ or no response)">Errors only</button>
+            <button data-chip="dups" title="When both sides captured the same request, show it once">Hide duplicates</button>
+          </div>
+          <div id="netMonitors" class="net-monitors"></div>
+          <div class="net-layout">
+            <div class="net-table-wrap" id="netWrap">
+              <table class="net-table">
+                <thead><tr><th>Time</th><th>Source</th><th>Launcher</th><th>Method</th><th>Status</th><th>URL</th><th>Type</th><th class="num">Size</th><th class="num">Duration</th></tr></thead>
+                <tbody id="netRows"></tbody>
+              </table>
+              <div id="netEmpty" class="net-empty"></div>
+            </div>
+            <aside id="netDetail" class="net-detail" hidden></aside>
+          </div>
+        </div>
+
+        <div class="tab-body" id="tab-git" hidden>
+          <div class="git-wrap" id="gitWrap"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Environment dialog -->
+  <dialog id="envDialog">
+    <form method="dialog" id="envForm">
+      <h2 id="envDlgTitle">New environment</h2>
+      <label>Project folder
+        <div class="row"><input name="path" required placeholder="C:\path\to\project" spellcheck="false"><button type="button" class="ghost" id="envBrowse">Browse…</button></div>
+      </label>
+      <label>Name <input name="name" placeholder="Taken from the folder name"></label>
+      <p class="hint" id="envHint">After saving, we'll look for <code>dev</code> / <code>start</code> scripts and suggest launchers.</p>
+      <div class="dialog-actions">
+        <button type="button" class="danger" id="envDelete" hidden>Remove environment</button>
+        <span class="grow"></span>
+        <button type="button" class="ghost" data-close>Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Launcher dialog -->
+  <dialog id="launcherDialog" class="wide">
+    <form method="dialog" id="launcherForm">
+      <h2 id="lDlgTitle">New launcher</h2>
+      <div class="two">
+        <label>Name <input name="name" required placeholder="api, client, admin…"></label>
+        <label>Command <input name="command" required class="mono" placeholder="npm run dev" spellcheck="false"></label>
+      </div>
+      <label>Type
+        <div class="seg type-seg" id="kindSeg">
+          <button type="button" data-kind="web">🌐 Website</button>
+          <button type="button" data-kind="api">⚡ API</button>
+          <button type="button" data-kind="both" title="A site that also has API routes, e.g. Next.js with app/api or Express serving a page">🌐⚡ Both</button>
+        </div>
+      </label>
+      <input type="hidden" name="kind">
+      <label>Working folder, relative to the environment (empty = project root)
+        <div class="row"><input name="cwd" class="mono" placeholder="e.g. apps/api" spellcheck="false"><button type="button" class="ghost" id="lBrowse">Browse…</button></div>
+      </label>
+      <div class="two">
+        <label>Port <input name="port" type="number" min="1" max="65535" placeholder="3000"></label>
+        <label>URL to open <input name="url" placeholder="http://localhost:3000" spellcheck="false"></label>
+      </div>
+      <p class="hint">When a port is set it's passed as <code>PORT</code>, it marks the launcher <b>Ready</b> once it answers, and it's checked before starting so you don't get "address in use" surprises.</p>
+      <label>Environment variables, one <code>KEY=value</code> per line
+        <textarea name="envText" class="env" spellcheck="false" placeholder="NODE_ENV=development&#10;API_URL=http://localhost:4000"></textarea>
+      </label>
+      <label class="check"><input type="checkbox" name="openOnReady"> Open the URL in the browser when it's ready</label>
+      <label class="check"><input type="checkbox" name="autoRestart"> Restart automatically if it crashes</label>
+      <label class="check"><input type="checkbox" name="monitor"> Monitor network traffic (Network tab)</label>
+      <div class="dialog-actions">
+        <button type="button" class="danger" id="lDelete" hidden>Delete launcher</button>
+        <span class="grow"></span>
+        <button type="button" class="ghost" data-close>Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Detect dialog -->
+  <dialog id="detectDialog" class="wide">
+    <form method="dialog" id="detectForm">
+      <h2>Detected launchers</h2>
+      <p class="hint" id="detectHint"></p>
+      <div class="detect-list" id="detectList"></div>
+      <div class="dialog-actions">
+        <span class="grow"></span>
+        <button type="button" class="ghost" data-close>Skip</button>
+        <button type="submit" class="primary">Add selected</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Settings dialog -->
+  <dialog id="settingsDialog">
+    <form method="dialog" id="settingsForm">
+      <h2>Settings</h2>
+      <label>Open sites in
+        <select name="openSitesIn">
+          <option value="app">App window (inside MC Dev Hub)</option>
+          <option value="browser">Default browser</option>
+        </select>
+      </label>
+      <p class="hint" id="sitesHint">Used by a launcher's <b>Open</b> button and "open when ready". The app window only exists in the desktop app; in a normal browser, sites open in a new tab.</p>
+      <label>Terminal to open <select name="terminal" id="terminalSelect"></select></label>
+      <label>Shell for CLI tabs <select name="cliShell" id="cliShellSelect"></select></label>
+      <label>Editor command <input name="editor" class="mono" placeholder="code" spellcheck="false"></label>
+      <p class="hint">Used by the <b>Editor</b> button, e.g. <code>code</code>, <code>cursor</code>, <code>webstorm</code>.</p>
+      <p class="hint" id="settingsInfo"></p>
+      <div class="dialog-actions">
+        <span class="grow"></span>
+        <button type="button" class="ghost" data-close>Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- API shared headers -->
+  <dialog id="apiAuthDialog" class="wide">
+    <form method="dialog" id="apiAuthForm">
+      <h2>Auth &amp; headers</h2>
+      <p class="hint">Sent with every request to this API. Use <code>Authorization: Bearer …</code> for tokens. After a login request, <b>Use token</b> on the response fills this in for you. Cookies the API sets are kept automatically.</p>
+      <div id="apiAuthRows" class="kv-rows"></div>
+      <div class="row"><button type="button" class="ghost small" id="apiAuthAdd">+ Header</button><span class="grow"></span><button type="button" class="ghost small" id="apiCookiesClear">Forget cookies</button></div>
+      <div class="dialog-actions">
+        <span class="grow"></span>
+        <button type="button" class="ghost" data-close>Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Paste cURL -->
+  <dialog id="curlDialog" class="wide">
+    <form method="dialog" id="curlForm">
+      <h2>Paste cURL</h2>
+      <p class="hint">Paste a curl command, e.g. from the browser's DevTools (right-click a request › Copy › Copy as cURL, bash or cmd). It opens as a request you can send and then save to <b>Custom</b>.</p>
+      <textarea id="curlText" class="code-area curl-text" spellcheck="false" placeholder="curl 'http://localhost:3000/api/users' -H 'accept: application/json'"></textarea>
+      <div id="curlError" class="error" hidden></div>
+      <div class="dialog-actions">
+        <span class="grow"></span>
+        <button type="button" class="ghost" data-close>Cancel</button>
+        <button type="submit" class="primary">Open</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Confirm dialog -->
+  <dialog id="confirmDialog">
+    <form method="dialog">
+      <h2 id="cfTitle"></h2>
+      <p id="cfText" class="muted" style="margin:0;white-space:pre-line"></p>
+      <input id="cfInput" hidden spellcheck="false">
+      <div class="dialog-actions">
+        <span class="grow"></span>
+        <button value="cancel" class="ghost">Cancel</button>
+        <button value="alt" id="cfAlt" class="ghost" hidden></button>
+        <button value="ok" id="cfOk" class="primary">OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="ansi.js"></script>
+  <script src="app.js"></script>
+  <script src="bodyview.js"></script>
+  <script src="console.js"></script>
+  <script src="network.js"></script>
+  <script src="curl.js"></script>
+  <script src="api.js"></script>
+</body>
+</html>

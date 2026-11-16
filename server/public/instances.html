@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Running instances</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    try { const t = JSON.parse(localStorage.getItem('mcdh.theme')); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}
+  </script>
+</head>
+<body class="inst-page">
+  <header class="topbar">
+    <div class="brand"><img class="logo" src="icon.svg" alt="">Running instances</div>
+    <span class="grow"></span>
+    <span id="scanInfo" class="summary-pill"></span>
+    <button id="refreshBtn" class="ghost small" title="Scan again">↻ Refresh</button>
+  </header>
+
+  <main class="inst-main">
+    <section class="inst-group" id="ownGroup">
+      <div class="inst-group-head">
+        <div>
+          <h3>Started by this launcher <span id="ownCount" class="chip"></span></h3>
+          <div class="muted small-text">Your launchers in every environment.</div>
+        </div>
+        <span class="grow"></span>
+        <label class="check small-text"><input type="checkbox" id="showStopped"> Show stopped</label>
+        <button id="ownStopAll" class="ghost small danger">■ Stop all</button>
+      </div>
+      <div id="ownList" class="inst-list"></div>
+    </section>
+
+    <section class="inst-group" id="otherGroup">
+      <div class="inst-group-head">
+        <div>
+          <h3>Other sources <span id="otherCount" class="chip"></span></h3>
+          <div class="muted small-text">Dev servers listening on a port that this launcher didn't start: a terminal, your editor, another tool.</div>
+        </div>
+        <span class="grow"></span>
+        <button id="otherRemoveStopped" class="ghost small" hidden>Remove stopped</button>
+        <button id="otherStopAll" class="ghost small danger">■ Stop all</button>
+      </div>
+      <div id="otherList" class="inst-list"></div>
+    </section>
+  </main>
+
+  <dialog id="confirmDlg">
+    <form method="dialog">
+      <h2 id="cdTitle"></h2>
+      <p id="cdText" class="muted" style="margin:0"></p>
+      <ul id="cdList" class="cd-list"></ul>
+      <div class="dialog-actions">
+        <span class="grow"></span>
+        <button value="cancel" class="ghost">Cancel</button>
+        <button value="ok" id="cdOk" class="danger-solid">Stop all</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="instances.js"></script>
+</body>
+</html>
