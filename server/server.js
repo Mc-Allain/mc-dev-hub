@@ -331,6 +331,12 @@ route('GET', '/api/envs/:id/git', async ({ p }) => {
   if (!sys.pathInfo(env.path).isDir) return { isRepo: false, folderMissing: true };
   return git.info(env.path);
 });
+route('GET', '/api/envs/:id/git/diff', async ({ p, q }) => {
+  const env = need(store.findEnv(p.id));
+  const flag = (k) => q.get(k) === '1';
+  try { return await git.fileDiff(env.path, { path: q.get('path') || '', from: q.get('from') || '', staged: flag('staged'), untracked: flag('untracked'), full: flag('full'), reveal: flag('reveal') }); }
+  catch (e) { throw new HttpError(e.status || 500, e.message); }
+});
 route('POST', '/api/envs/:id/git', async ({ p, body }) => {
   const env = need(store.findEnv(p.id));
   if (body.action === 'switch') {

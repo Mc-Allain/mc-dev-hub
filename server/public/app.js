@@ -755,7 +755,11 @@ function renderGit() {
     + (hd.detached ? '<option selected>(detached HEAD)</option>' : '')
     + (g.remoteBranches.length ? `<optgroup label="Remote only">${g.remoteBranches.map((b) => `<option>${h(b)}</option>`).join('')}</optgroup>` : '');
 
-  const fileRow = (f, isStaged) => `<li title="${h(f.from ? `${f.from} → ${f.path}` : f.path)}">
+  // the Changes list in display order (staged first), for the before/after view's ‹ › buttons
+  const diffList = [...staged.map((f) => ({ f, s: true })), ...unstaged.map((f) => ({ f, s: false }))]
+    .map(({ f, s }) => ({ path: f.path, from: f.from, staged: s, untracked: !!f.untracked, letter: s ? f.x : statusLetter(f) }));
+  setDiffList(diffList);
+  const fileRow = (f, isStaged) => `<li class="file-row" data-git="diff" data-i="${diffList.findIndex((d) => d.path === f.path && d.staged === isStaged)}" title="${h(f.from ? `${f.from} → ${f.path}` : f.path)}: click to see the changes">
       <span class="st ${statusLetter(f)}">${statusLetter(f)}</span><span class="p mono">‎${h(f.path)}</span>
       <button class="plain small" data-git="${isStaged ? 'unstage' : 'stage'}" data-path="${h(f.path)}" title="${isStaged ? 'Unstage' : 'Stage'}">${isStaged ? '−' : '+'}</button></li>`;
 
@@ -1025,6 +1029,7 @@ $('#gitWrap').addEventListener('click', async (ev) => {
   const e = env();
   switch (a) {
     case 'refresh': return loadGit();
+    case 'diff': return openDiff(+b.dataset.i);
     case 'clearOut': gitOut(e.id).length = 0; return renderGit();
     case 'init': return gitAction({ action: 'init' }, 'git init');
     case 'aiMessage': return aiCommitMessage();

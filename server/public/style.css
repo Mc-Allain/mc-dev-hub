@@ -367,6 +367,7 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .files li { display: flex; gap: 8px; align-items: center; padding: 3px 12px; font-size: 13px; }
 .files li:hover { background: var(--panel-2); }
 .files li .p { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.files li.file-row { cursor: pointer; }
 .files li button { opacity: 0; }
 .files li:hover button { opacity: 1; }
 .files .group { font-size: 11px; font-weight: 700; letter-spacing: .4px; color: var(--muted); padding: 8px 12px 2px; text-transform: uppercase; }
@@ -593,3 +594,42 @@ body.inst-page { overflow: auto; }
   background: color-mix(in srgb, var(--danger) 10%, transparent); border-radius: 6px; padding: 4px 8px; }
 .inst-empty { padding: 18px 14px; color: var(--muted); font-size: 13px; text-align: center; }
 @media (max-width: 640px) { .inst-row { grid-template-columns: auto 1fr; } .inst-meta, .inst-actions { grid-column: 2; text-align: left; justify-content: flex-start; } }
+
+/* ---------- Git: before/after view of a changed file ---------- */
+:root { --diff-add-bg: #e6ffec; --diff-add-x: #abf2bc; --diff-add-ln: #ccffd8; --diff-del-bg: #ffebe9; --diff-del-x: #ffc1c0; --diff-del-ln: #ffd7d5; --diff-hunk-bg: #ddf4ff; --diff-empty: #f6f8fa; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --diff-add-bg: #12261e; --diff-add-x: #1f5f3a; --diff-add-ln: #173a28; --diff-del-bg: #2a1517; --diff-del-x: #7a2a2e; --diff-del-ln: #3f1c1f; --diff-hunk-bg: #142036; --diff-empty: #161b23; }
+}
+:root[data-theme="dark"] { --diff-add-bg: #12261e; --diff-add-x: #1f5f3a; --diff-add-ln: #173a28; --diff-del-bg: #2a1517; --diff-del-x: #7a2a2e; --diff-del-ln: #3f1c1f; --diff-hunk-bg: #142036; --diff-empty: #161b23; }
+
+dialog.diff-dialog { width: min(1400px, calc(100vw - 32px)); height: calc(100vh - 48px); max-height: none; padding: 0; display: none; flex-direction: column; overflow: hidden; }
+dialog.diff-dialog[open] { display: flex; }
+.diff-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel-2); flex-wrap: wrap; }
+.diff-head .st { width: 20px; font-size: 11.5px; padding: 1px 0; }
+.diff-title { display: flex; flex-direction: column; min-width: 0; max-width: 55%; }
+.diff-title b { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.diff-stat { font: 600 12.5px ui-monospace, Consolas, monospace; }
+.diff-stat .a { color: var(--ok); } .diff-stat .d { color: var(--danger); }
+.diff-head label.check { display: flex; flex-direction: row; align-items: center; gap: 6px; color: var(--text); }
+.diff-nav { display: flex; align-items: center; gap: 6px; }
+.diff-body { flex: 1; overflow: auto; background: var(--panel); }
+.diff-msg { padding: 24px; color: var(--muted); font-size: 13.5px; }
+.diff-table { width: 100%; border-collapse: collapse; table-layout: fixed; font: 12.5px/1.55 ui-monospace, Consolas, monospace; tab-size: 4; }
+.diff-table col.ln { width: 52px; }
+.diff-table td { padding: 0 10px; vertical-align: top; }
+.diff-table td.ln { text-align: right; color: var(--muted); user-select: none; padding: 0 8px; font-size: 11.5px; }
+.diff-table td.code { white-space: pre-wrap; word-break: break-all; }
+.diff-table.split td.code + td.ln { border-left: 1px solid var(--border); }
+.diff-table td.code.add { background: var(--diff-add-bg); }
+.diff-table td.code.del { background: var(--diff-del-bg); }
+.diff-table td.code.empty { background: var(--diff-empty); }
+.diff-table td.ln:has(+ td.code.add) { background: var(--diff-add-ln); }
+.diff-table td.ln:has(+ td.code.del) { background: var(--diff-del-ln); }
+.diff-table.unified tr:has(td.code.add) td.ln { background: var(--diff-add-ln); }
+.diff-table.unified tr:has(td.code.del) td.ln { background: var(--diff-del-ln); }
+.diff-table td.code.add .x { background: var(--diff-add-x); border-radius: 2px; }
+.diff-table td.code.del .x { background: var(--diff-del-x); border-radius: 2px; }
+.diff-table .sign { display: inline-block; width: 14px; margin-left: -4px; color: var(--muted); user-select: none; }
+.diff-table tr.hunk td { background: var(--diff-hunk-bg); color: var(--muted); padding: 4px 10px; font-size: 12px; }
+.diff-table tr.hunk .ctx { color: var(--text); opacity: .75; }
+.diff-table tr.nonl td { color: var(--muted); font-style: italic; font-size: 11.5px; }

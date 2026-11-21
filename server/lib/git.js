@@ -111,6 +111,57 @@ export async function info(cwd) {
   };
 }
 
+// Files whose contents stay hidden in the diff view until asked for (keys, passwords, tokens)
+const SECRET_FILE_RE = /(^|\/)(\.env(\..*)?|id_rsa[^/]*|[^/]*\.(pem|key|pfx|p12|keystore))$|(^|\/)secrets\//i;
+const MAX_DIFF_BYTES = 2 * 1024 * 1024;
+
+/**
+ * One file's changes as a unified diff, for the before/after view.
+ * staged: HEAD vs index; otherwise index vs working tree; untracked: the whole file as added.
+ * full: the whole file as context, not just 3 lines around each change.
+ * -> { path, from, diff, binary, tooLarge, secret, untracked, staged }
+ */
+export async function fileDiff(cwd, { path: file, from: oldPath = '', staged = false, untracked = false, full = false, reveal = false }) {
+  const top = (await git(cwd, ['rev-parse', '--show-toplevel'])).stdout.trim(); // status paths are relative to the repo root
+  if (!top) throw Object.assign(new Error('Not a git repository'), { status: 400 });
+  const rel = String(file || '').replace(/\\/g, '/');
+  if (!rel || rel.startsWith('/') || rel.split('/').includes('..')) throw Object.assign(new Error('Bad file path'), { status: 400 });
+  const base = { path: rel, from: '', diff: '', binary: false, tooLarge: false, secret: false, untracked, staged };
+  if (SECRET_FILE_RE.test(rel) && !reveal) return { ...base, secret: true };
+
+  if (untracked) {
+    const fs = await import('node:fs');
+    const pathMod = await import('node:path');
+    const abs = pathMod.resolve(top, rel);
+    if (!abs.toLowerCase().startsWith(pathMod.resolve(top).toLowerCase() + pathMod.sep)) throw Object.assign(new Error('Bad file path'), { status: 400 });
+    let st;
+    try { st = fs.statSync(abs); } catch { throw Object.assign(new Error('The file is gone'), { status: 404 }); }
+    if (!st.isFile()) return { ...base, binary: true };
+    if (st.size > MAX_DIFF_BYTES) return { ...base, tooLarge: true };
+    const buf = fs.readFileSync(abs);
+    if (buf.includes(0)) return { ...base, binary: true };
+    const lines = buf.toString('utf8').replace(/\r\n/g, '\n').split('\n');
+    if (lines.length && lines[lines.length - 1] === '') lines.pop();
+    const diff = `@@ -0,0 +1,${lines.length} @@\n` + lines.map((l) => '+' + l).join('\n');
+    return { ...base, diff: lines.length ? diff : '' };
+  }
+
+  // a rename needs both names in the pathspec, or git sees only a new file
+  const from = String(oldPath || '').replace(/\\/g, '/');
+  const paths = from && !from.startsWith('/') && !from.split('/').includes('..') ? [from, rel] : [rel];
+  const args = ['-c', 'core.quotepath=off', 'diff', '--no-color', '--no-ext-diff', '-M', full ? '-U100000' : '-U3', ...(staged ? ['--cached'] : []), '--', ...paths];
+  const r = await git(top, args, 30000);
+  if (!r.ok) throw Object.assign(new Error((r.stderr || 'git diff failed').trim().split('\n').pop()), { status: 500 });
+  let out = r.stdout;
+  if (out.length > MAX_DIFF_BYTES) return { ...base, tooLarge: true };
+  if (/^Binary files .* differ$/m.test(out)) return { ...base, binary: true };
+  const renamedFrom = (out.match(/^rename from (.+)$/m) || [])[1] || '';
+  const similarity = +((out.match(/^similarity index (\d+)%$/m) || [])[1] || 0);
+  const at = out.indexOf('\n@@');
+  out = at >= 0 ? out.slice(at + 1) : ''; // drop the header (diff --git, index, ---/+++ lines); keep the hunks
+  return { ...base, from: renamedFrom, similarity, diff: out.replace(/\r(?=\n)/g, '') };
+}
+
 // Splits `commit -m "a b"` into ['commit', '-m', 'a b']
 export function splitArgs(s) {
   const out = [];
