@@ -78,7 +78,14 @@ function confirmStop(title, text, items, okLabel = 'Stop all') {
   d.returnValue = 'cancel';
   d.showModal();
   $('#cdOk').focus();
-  return new Promise((resolve) => d.addEventListener('close', () => resolve(d.returnValue === 'ok'), { once: true }));
+  return new Promise((resolve) => { // the button's submit or close (Esc), whichever arrives first
+    const form = d.querySelector('form');
+    const done = (v) => { d.removeEventListener('close', onClose); form?.removeEventListener('submit', onSubmit); resolve(v === 'ok'); };
+    const onClose = () => done(d.returnValue);
+    const onSubmit = (ev) => done(ev.submitter?.value || 'cancel');
+    d.addEventListener('close', onClose);
+    form?.addEventListener('submit', onSubmit);
+  });
 }
 
 // ---------- data ----------

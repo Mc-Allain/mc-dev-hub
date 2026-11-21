@@ -235,6 +235,14 @@
       <label>Shell for CLI tabs <select name="cliShell" id="cliShellSelect"></select></label>
       <label>Editor command <input name="editor" class="mono" placeholder="code" spellcheck="false"></label>
       <p class="hint">Used by the <b>Editor</b> button, e.g. <code>code</code>, <code>cursor</code>, <code>webstorm</code>.</p>
+      <fieldset class="ai-settings">
+        <legend>✨ AI in the Git tab <span class="chip">Claude Code</span></legend>
+        <label class="check" id="aiToggle" hidden><input type="checkbox" name="aiEnabled"> Turn on AI buttons in the Git tab</label>
+        <p class="hint">Claude Code on this PC reads your changes and writes commit messages for you. It uses <b>your own</b> Claude login and plan, and your changes (diffs) are sent to Anthropic. Secret files like <code>.env</code> and keys are never read.</p>
+        <div id="aiSetup" class="ai-setup"></div>
+        <div class="row"><button type="button" class="ghost small" data-ai="recheck-settings">Check again</button></div>
+        <label id="aiModelRow" hidden>Model <select name="aiModel" id="aiModelSelect"></select></label>
+      </fieldset>
       <p class="hint" id="settingsInfo"></p>
       <div class="dialog-actions">
         <span class="grow"></span>
@@ -297,5 +305,6 @@
   <script src="network.js"></script>
   <script src="curl.js"></script>
   <script src="api.js"></script>
+  <script src="ai.js"></script>
 </body>
 </html>

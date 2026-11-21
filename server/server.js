@@ -15,6 +15,7 @@ import { scanProject, fetchOpenApi } from './lib/apiscan.js';
 import { Instances, processTable, establishedConnections, listeningSockets } from './lib/instances.js';
 import { CliManager } from './lib/cli.js';
 import { NetMonitor } from './lib/monitor.js';
+import { AiJobs, claudeStatus, openSignIn, signOut, AI_MODELS, DEFAULT_AI_MODEL } from './lib/ai.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -29,6 +30,7 @@ const store = createStore(DATA_DIR);
 const procs = new ProcessManager();
 const clis = new CliManager((lid) => store.findLauncher(lid));
 const netmon = new NetMonitor({ store });
+const aiJobs = new AiJobs();
 await netmon.listen();
 procs.monitorEnv = (launcher, nodeOptions) => netmon.hookEnv(launcher, nodeOptions);
 procs.on('monitorStart', (lid) => netmon.launcherStarted(lid));
@@ -52,6 +54,7 @@ netmon.on('entries', (x) => broadcast('net', x));
 netmon.on('cleared', (x) => broadcast('netCleared', x));
 netmon.on('hooks', (x) => broadcast('netHooks', x));
 netmon.on('token', (x) => broadcast('netToken', x));
+aiJobs.on('event', (x) => broadcast('ai', x));
 // "Open when ready": in the desktop app's window when that's the setting and the app is open, else the browser
 procs.on('openSite', (site) => {
   if (store.state.settings.openSitesIn !== 'browser') {
@@ -244,7 +247,10 @@ const route = (method, pattern, fn) => routes.push({ method, re: new RegExp('^' 
 route('GET', '/api/health', () => ({ ok: true, app: 'mc-dev-hub', version: VERSION, pid: process.pid, port: PORT }));
 route('GET', '/api/state', () => stateView());
 
-route('POST', '/api/settings', ({ body }) => store.updateSettings(body));
+route('POST', '/api/settings', async ({ body }) => {
+  if (body.aiEnabled) { const c = await claudeStatus(); if (!(c.installed && c.loggedIn)) body.aiEnabled = false; } // needs a signed-in Claude Code
+  return store.updateSettings(body);
+});
 
 route('POST', '/api/envs', ({ body }) => {
   if (!String(body.path || '').trim()) throw new HttpError(400, 'Choose a folder for this environment');
@@ -392,6 +398,32 @@ route('POST', '/api/launchers/:lid/monitor', ({ p, body }) => {
 });
 // from the desktop app's site windows
 route('POST', '/api/net/browser', ({ body }) => netmon.ingestBrowser(body));
+
+// ---------- AI in the Git tab (Claude Code) ----------
+// AI stays on only while Claude Code is signed in: signing out (here or elsewhere) turns it off.
+async function aiStatus(refresh = false) {
+  const claude = await claudeStatus(refresh);
+  if (store.state.settings.aiEnabled && !(claude.installed && claude.loggedIn)) store.updateSettings({ aiEnabled: false });
+  return { enabled: !!store.state.settings.aiEnabled, model: store.state.settings.aiModel || DEFAULT_AI_MODEL, models: AI_MODELS, claude };
+}
+route('GET', '/api/ai/status', ({ q }) => aiStatus(q.get('refresh') === '1'));
+route('POST', '/api/ai/sign-out', async () => {
+  try { await signOut(); } catch (e) { throw new HttpError(e.status || 500, e.message); }
+  store.updateSettings({ aiEnabled: false });
+  return aiStatus();
+});
+route('GET', '/api/envs/:id/ai', ({ p }) => { need(store.findEnv(p.id)); return { job: aiJobs.current(p.id) }; });
+route('POST', '/api/envs/:id/ai/commit-message', async ({ p }) => {
+  const env = need(store.findEnv(p.id));
+  if (!store.state.settings.aiEnabled) throw new HttpError(400, 'AI in the Git tab is turned off. Turn it on in Settings.', { code: 'AI_OFF' });
+  try { return await aiJobs.commitMessage(env, store.state.settings.aiModel || DEFAULT_AI_MODEL); }
+  catch (e) { throw new HttpError(e.status || 500, e.message, e.code ? { code: e.code } : undefined); }
+});
+route('POST', '/api/ai/sign-in', async ({ body }) => {
+  try { return await openSignIn(String(body.shell || '')); }
+  catch (e) { throw new HttpError(e.status || 500, e.message); }
+});
+route('POST', '/api/ai/jobs/:jid/cancel', async ({ p }) => { await aiJobs.cancel(p.jid); return { ok: true }; });
 
 // ---------- API tab: the running app's bearer token, from Network monitor captures only ----------
 route('GET', '/api/launchers/:lid/token', ({ p }) => {

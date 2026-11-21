@@ -124,6 +124,9 @@ export function createStore(dataDir) {
       if (patch.terminal != null) s.terminal = str(patch.terminal, 40);
       if (patch.editor != null) s.editor = str(patch.editor, 200).trim() || 'code';
       if (patch.cliShell != null) s.cliShell = str(patch.cliShell, 20);
+      // AI in the Git tab (Claude Code): off until someone turns it on, per PC
+      if (patch.aiEnabled != null) s.aiEnabled = !!patch.aiEnabled;
+      if (patch.aiModel != null) s.aiModel = ['claude-sonnet-5-5', 'claude-opus-5-5'].includes(patch.aiModel) ? patch.aiModel : 'claude-sonnet-5-5';
       if (patch.openSitesIn != null) s.openSitesIn = patch.openSitesIn === 'browser' ? 'browser' : 'app';
       state.settings = s;
       save();

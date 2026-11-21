@@ -115,7 +115,7 @@ const selectedLauncher = () => { const e = env(); if (!e) return null; return e.
 async function loadState() {
   const st = await api('GET', '/api/state');
   S.platform = st.platform; S.settings = st.settings; S.terminals = st.terminals; S.envs = st.environments;
-  S.statuses = st.statuses; S.info = st; S.clis = st.clis || []; S.cliShells = st.cliShells || []; S.netHooks = st.netHooks || {};
+  S.statuses = st.statuses; S.info = st; loadAiStatus(); S.clis = st.clis || []; S.cliShells = st.cliShells || []; S.netHooks = st.netHooks || {};
   if (!S.envs.find((e) => e.id === S.envId)) S.envId = S.envs[0]?.id || null;
   render();
 }
@@ -143,6 +143,7 @@ function connect() {
   es.addEventListener('cli', (ev) => onCliEvent(JSON.parse(ev.data)));
   es.addEventListener('net', (ev) => onNetEntries(JSON.parse(ev.data)));
   es.addEventListener('netToken', (ev) => apiTokenSeen(JSON.parse(ev.data).envId));
+  es.addEventListener('ai', (ev) => onAiEvent(JSON.parse(ev.data)));
   es.addEventListener('netCleared', (ev) => onNetCleared(JSON.parse(ev.data)));
   es.addEventListener('netHooks', (ev) => onNetHooks(JSON.parse(ev.data)));
   es.addEventListener('cliClosed', (ev) => onCliClosed(JSON.parse(ev.data)));
@@ -475,7 +476,17 @@ function confirmBox({ title, text, ok = 'OK', alt = '', danger = false, input = 
   d.showModal();
   if (input != null) { inp.focus(); inp.select(); }
   return new Promise((resolve) => {
-    d.addEventListener('close', () => resolve(input != null ? (d.returnValue === 'ok' ? inp.value : null) : d.returnValue), { once: true });
+    // settle on the button's submit or on close (Esc, Enter in the input), whichever comes first:
+    // some WebViews never deliver a dialog's close event, while the submit always arrives
+    const form = d.querySelector('form');
+    const done = (v) => {
+      d.removeEventListener('close', onClose); form.removeEventListener('submit', onSubmit);
+      resolve(input != null ? (v === 'ok' ? inp.value : null) : v);
+    };
+    const onClose = () => done(d.returnValue);
+    const onSubmit = (ev) => done(ev.submitter?.value || 'cancel');
+    d.addEventListener('close', onClose);
+    form.addEventListener('submit', onSubmit);
   });
 }
 $('#cfInput').addEventListener('keydown', (ev) => {
@@ -675,6 +686,8 @@ $('#settingsBtn').addEventListener('click', () => {
   $('#cliShellSelect').innerHTML = S.cliShells.map((t) => `<option value="${t.id}">${h(t.label)}</option>`).join('');
   f.cliShell.value = S.cliShells.some((t) => t.id === S.settings.cliShell) ? S.settings.cliShell : (S.cliShells[0]?.id || '');
   const i = S.info || {};
+  renderAiSettings(true);
+  loadAiStatus(true);
   $('#settingsInfo').innerHTML = `Server v${h(i.version)} on port <b>${h(i.port)}</b>. The port and startup options are set in the <b>MC Dev Hub · Server</b> desktop app.<br>Data file: <code>${h(i.dataFile)}</code>`;
   $('#settingsDialog').showModal();
 });
@@ -682,8 +695,10 @@ $('#settingsForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const f = ev.target;
   try {
-    S.settings = await api('POST', '/api/settings', { terminal: f.terminal.value, editor: f.editor.value, openSitesIn: f.openSitesIn.value, cliShell: f.cliShell.value });
+    S.settings = await api('POST', '/api/settings', { terminal: f.terminal.value, editor: f.editor.value, openSitesIn: f.openSitesIn.value, cliShell: f.cliShell.value, aiEnabled: f.aiEnabled.checked, aiModel: f.aiModel.value });
     $('#settingsDialog').close();
+    await loadAiStatus(); // before re-rendering the Git tab, so the AI button matches what was saved
+    if (S.tab === 'git') renderGit();
     toast('Settings saved');
   } catch (err) { fail(err); }
 });
@@ -806,13 +821,16 @@ function renderGit() {
           ${unstaged.length ? `<li class="group">Not staged · ${unstaged.length}</li>${unstaged.map((f) => fileRow(f, false)).join('')}` : ''}
         </ul>` : '<div class="body muted">Working tree clean, nothing to commit.</div>'}
         <div class="commit-box">
-          <textarea id="commitMsg" placeholder="Commit message" ${busy}>${h(S.commitDraft?.[e.id] || '')}</textarea>
+          <textarea id="commitMsg" placeholder="Commit message" ${busy} ${store.get('commitMsgHeight', 0) ? `style="height:${store.get('commitMsgHeight', 0)}px"` : ''}>${h(S.commitDraft?.[e.id] || '')}</textarea>
           <div class="row">
             <label><input type="checkbox" id="commitAll" ${staged.length ? '' : 'checked'}> Stage all changes first</label>
             <span class="grow"></span>
+            ${aiCommitButton()}
             <button class="ghost" data-git="commit" ${busy}>Commit</button>
             <button class="primary" data-git="commitPush" ${busy}>Commit &amp; push</button>
           </div>
+          ${aiOffNote()}
+          <div class="ai-card" id="aiCard" hidden></div>
         </div>
       </div>
     </div>
@@ -841,7 +859,23 @@ function renderGit() {
   </div>`;
   const o = $('#gitOut');
   o.scrollTop = o.scrollHeight;
+  watchCommitHeight();
   updateSwitchLock();
+  renderAiCard();
+}
+
+/** Remembers the height the commit message box is dragged to (kept across re-renders and restarts, for all environments). */
+let commitResize;
+function watchCommitHeight() {
+  commitResize?.disconnect();
+  const ta = $('#commitMsg');
+  if (!ta || !window.ResizeObserver) return;
+  commitResize = new ResizeObserver(() => {
+    // a drag writes the new size into style.height; saving that (not offsetHeight) keeps it from growing by the padding each time
+    const px = Math.round(parseFloat(ta.style.height) || 0);
+    if (px > 0 && ta.offsetHeight > 0 && px !== store.get('commitMsgHeight', 0)) store.set('commitMsgHeight', px);
+  });
+  commitResize.observe(ta);
 }
 
 /** No branch switching while this environment's launchers run (the server refuses it too). Updated live, without a re-render. */
@@ -963,6 +997,7 @@ $('#gitWrap').addEventListener('click', async (ev) => {
     case 'refresh': return loadGit();
     case 'clearOut': gitOut(e.id).length = 0; return renderGit();
     case 'init': return gitAction({ action: 'init' }, 'git init');
+    case 'aiMessage': return aiCommitMessage();
     case 'fetch': return gitAction({ action: 'fetch' }, 'Fetch');
     case 'pull': return gitAction({ action: 'pull' }, 'Pull');
     case 'push': return gitAction({ action: 'push' }, 'Push');

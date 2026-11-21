@@ -112,6 +112,20 @@ A launcher with a **port**:
 
 Options per launcher: open the URL in your browser when ready, and restart automatically if it crashes (up to 5 times in a row).
 
+## AI in the Git tab (Claude Code)
+
+Optional, and off until you turn it on in **Settings → AI in the Git tab**. Each person sets it up on their own PC:
+
+1. **Install Claude Code**: in PowerShell `irm https://claude.ai/install.ps1 | iex`, or `winget install Anthropic.ClaudeCode` (more options in [Anthropic's setup guide](https://code.claude.com/docs/en/setup)). A copy bundled with the Claude desktop app is found too.
+2. **Sign in**: run `claude` in a new terminal and follow the browser prompts (needs a Claude Pro, Max, Team or Enterprise plan, or an Anthropic Console account).
+3. **Turn it on** in Settings, press **Check again**, and pick the model: **Claude Sonnet 5.5** (default) or **Claude Opus 5.5**.
+
+Then the Git tab has **✨ Commit message**: Claude reads your changes (staged ones if anything is staged, otherwise all) and writes a message into the commit box. Nothing is committed; you edit it and press Commit. An **AI log** under the box shows what it looked at, which style it followed and roughly what it cost.
+
+- **Style:** it follows a rules file in the repo if there is one (`CONTRIBUTING.md`, `CLAUDE.md`, `agent-rules/…`, commitlint config), otherwise the style of the repo's recent commits, otherwise Conventional Commits.
+- **Read-only and limited:** Claude Code runs in the environment's folder with only file reading/search and `git status/diff/log/show/branch`. Secret files (`.env`, keys) can't be read and are left out of what's sent. The repo's own Claude settings and hooks aren't used.
+- **Your account:** it uses your Claude login and plan; your changes are sent to Anthropic.
+
 ## MC Dev Hub's own folder
 
 You can add MC Dev Hub's own folder (or a folder inside it) as an environment, e.g. to use its Git tab and terminal. It's recognised automatically and gets no launchers: adding, detecting and starting them is turned off, since MC Dev Hub is already running and a second copy would fight it for its port and data. The Network tab is hidden there too. CLI tabs (in the project root), Terminal, Folder, Editor and Git work as usual.

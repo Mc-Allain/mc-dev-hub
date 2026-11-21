@@ -33,6 +33,32 @@ function winShellStart(rest) {
 }
 const winStart = (cwd, programAndArgs) => winShellStart(`/D "${cwd}" ${programAndArgs}`);
 
+/**
+ * Opens a new, visible console window in the chosen shell ('powershell' | 'pwsh' | 'cmd') that runs one program
+ * and stays open afterwards, so its result can be read (e.g. an interactive sign-in). Goes through `start`, which
+ * always gives the program its own window (as the Terminal button does).
+ * -> the shell actually used
+ */
+export async function openShellWindow(shell, file, args = [], cwd = process.cwd()) {
+  if (!isWin) throw new Error('Opening a console window is only supported on Windows for now');
+  // characters cmd would act on even inside quotes are dropped (they don't occur in program paths or our arguments)
+  const safe = (s) => String(s).replace(/["%\r\n^]/g, '');
+  const dir = safe(path.resolve(cwd));
+  if (shell === 'cmd') {
+    // start "" /D "dir" "cmd.exe" /k ""C:\path\app.exe" "arg" …"  (cmd strips the outer quotes and keeps the window open)
+    const quote = (s) => (/^[\w.:\\/-]+$/.test(s) ? s : `"${safe(s)}"`);
+    const inner = [`"${safe(file)}"`, ...args.map(quote)].join(' ');
+    await winShellStart(`/D "${dir}" "${safe(process.env.ComSpec || 'cmd.exe')}" /k "${inner}"`);
+    return 'cmd';
+  }
+  // PowerShell: & 'C:\path\app.exe' 'arg'  (single quotes are literal there; a ' inside is doubled)
+  const lit = (s) => `'${safe(s).replace(/'/g, "''")}'`;
+  const used = shell === 'pwsh' && findPwsh() ? 'pwsh' : 'powershell';
+  const exe = used === 'pwsh' ? findPwsh() : 'powershell.exe';
+  await winShellStart(`/D "${dir}" "${safe(exe)}" -NoExit -NoLogo -NoProfile -Command "& ${[lit(file), ...args.map(lit)].join(' ')}"`);
+  return used;
+}
+
 const exists = (p) => { try { return fs.existsSync(p); } catch { return false; } };
 let wtPath;
 function findWindowsTerminal() {
