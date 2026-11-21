@@ -297,6 +297,19 @@
     </form>
   </dialog>
 
+  <dialog id="mergeDialog">
+    <form method="dialog">
+      <h2>⤵ Merge into <span id="mergeInto" class="mono"></span></h2>
+      <label>Merge from <select id="mergeBranch"></select></label>
+      <p class="hint" id="mergeHint" style="margin:0"></p>
+      <div class="dialog-actions">
+        <span class="grow"></span>
+        <button value="cancel" class="ghost">Cancel</button>
+        <button value="ok" class="primary">Merge</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="diffDialog" class="diff-dialog" aria-label="File changes">
     <div class="diff-head" id="diffHead"></div>
     <div class="diff-body" id="diffBody"></div>

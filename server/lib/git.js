@@ -1,5 +1,7 @@
 // Thin wrapper around the git CLI for the Git tab.
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import { adoptGit } from './system.js';
 
 function git(cwd, args, timeout = 120000) {
@@ -49,7 +51,9 @@ function parseStatus(out) {
     const x = e[0], y = e[1], p = e.slice(3);
     let from = '';
     if (x === 'R' || x === 'C') { from = entries[++i] || ''; }
-    files.push({ x, y, path: p, from, staged: x !== ' ' && x !== '?', unstaged: y !== ' ', untracked: x === '?' });
+    // unmerged (a merge conflict): UU, AA, DD, AU, UA, DU, UD
+    const conflict = x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D');
+    files.push({ x, y, path: p, from, conflict, staged: !conflict && x !== ' ' && x !== '?', unstaged: !conflict && y !== ' ', untracked: x === '?' });
   }
   return { head, files };
 }
@@ -59,7 +63,7 @@ export async function info(cwd) {
   if (probe.missing && await adoptGit()) probe = await git(cwd, ['rev-parse', '--show-toplevel']); // installed since the hub started
   if (probe.missing) return { isRepo: false, gitMissing: true };
   if (!probe.ok) return { isRepo: false };
-  const [status, remotes, log, branches, remoteBranches, stash, uname, uemail] = await Promise.all([
+  const [status, remotes, log, branches, remoteBranches, stash, uname, uemail, mergeHead] = await Promise.all([
     git(cwd, ['status', '--porcelain=v1', '-b', '-z', '-uall']),
     git(cwd, ['remote', '-v']),
     git(cwd, ['log', '-n', '25', '--pretty=format:%H%x1f%h%x1f%an%x1f%ar%x1f%aI%x1f%s%x1f%D%x1e']),
@@ -68,9 +72,17 @@ export async function info(cwd) {
     git(cwd, ['stash', 'list', '--format=%gd%x1f%s']),
     git(cwd, ['config', 'user.name']),
     git(cwd, ['config', 'user.email']),
+    git(cwd, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']), // a merge (or pull) stopped half-way
   ]);
 
   const { head, files } = parseStatus(status.stdout);
+  let merging = null;
+  if (mergeHead.ok && mergeHead.stdout.trim()) {
+    const msg = (await git(cwd, ['rev-parse', '--git-path', 'MERGE_MSG'])).stdout.trim();
+    let subject = '';
+    try { subject = fs.readFileSync(path.resolve(probe.stdout.trim(), msg), 'utf8').split(/\r?\n/)[0]; } catch { /* no message file */ }
+    merging = { subject, conflicts: files.filter((f) => f.conflict).length };
+  }
   const remoteMap = {};
   for (const line of remotes.stdout.split(/\r?\n/)) {
     const m = line.match(/^(\S+)\s+(\S+)\s+\((fetch|push)\)$/);
@@ -106,6 +118,7 @@ export async function info(cwd) {
     branches: local,
     remoteBranches: remoteOnly,
     remoteRefs, // as of the last fetch
+    merging, // { subject, conflicts } while a merge waits to be finished or aborted
     stashes: stash.stdout.split(/\r?\n/).filter(Boolean).map((s) => { const [ref, msg] = s.split('\x1f'); return { ref, msg }; }),
     user: { name: uname.stdout.trim(), email: uemail.stdout.trim() },
   };
@@ -190,7 +203,37 @@ export async function action(cwd, body) {
 
   switch (a) {
     case 'fetch': await exec(['fetch', '--all', '--prune']); break;
-    case 'pull': await exec(['pull']); break;
+    case 'pull': {
+      // the current branch's own copy on the remote, into the local branch
+      const st = await info(cwd);
+      if (!st.head?.upstream) throw Object.assign(new Error(`${st.head?.branch || 'This branch'} isn't on the remote yet, so there's nothing to pull. Push publishes it.`), { status: 400 });
+      if (st.head.gone) throw Object.assign(new Error(`${st.head.upstream} was deleted on the remote, so there's nothing to pull.`), { status: 400 });
+      await exec(['pull', '--no-edit']);
+      break;
+    }
+    case 'merge': {
+      // another branch (local, or remote like origin/main) into the current one
+      const ref = String(body.branch || '').trim();
+      if (!NAME_RE.test(ref)) throw Object.assign(new Error('Pick a branch to merge'), { status: 400 });
+      const st = await info(cwd);
+      if (st.merging) throw Object.assign(new Error('A merge is already in progress: finish or abort it first.'), { status: 409 });
+      if (ref === st.head.branch) throw Object.assign(new Error('That is the branch you are on. Pick another one to merge into it.'), { status: 400 });
+      const remote = (st.remotes || []).find((r) => ref.startsWith(r.name + '/'));
+      if (remote) { // bring the remote branch up to date first
+        const f = await exec(['fetch', remote.name, ref.slice(remote.name.length + 1)]);
+        if (!f.ok) break;
+      }
+      await exec(['merge', '--no-edit', ref]);
+      break;
+    }
+    case 'mergeAbort': await exec(['merge', '--abort']); break;
+    case 'mergeFinish': {
+      const st = await info(cwd);
+      if (!st.merging) throw Object.assign(new Error('No merge in progress'), { status: 400 });
+      if (st.merging.conflicts) throw Object.assign(new Error(`Resolve the ${st.merging.conflicts} conflicted file${st.merging.conflicts > 1 ? 's' : ''} first: fix them in your editor, then stage them with +.`), { status: 400 });
+      await exec(['commit', '--no-edit']);
+      break;
+    }
     case 'push': {
       const st = await info(cwd);
       if (st.head?.upstream && !st.head.gone) await exec(['push']);

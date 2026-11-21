@@ -745,6 +745,17 @@ function renderGit() {
   const hd = g.head;
   const staged = g.files.filter((f) => f.staged);
   const unstaged = g.files.filter((f) => f.unstaged || f.untracked);
+  const conflicts = g.files.filter((f) => f.conflict);
+  const merging = g.merging;
+
+  // Pull = this branch's own copy on the remote (e.g. origin/feat/x) into the local branch: say so, and only offer it when it can help
+  const pull = !hd.upstream || hd.detached
+    ? { off: `${hd.detached ? 'You are not on a branch' : `${h(hd.branch)} isn't on the remote yet`}, so there's nothing to pull. Push publishes it.` }
+    : hd.gone ? { off: `${hd.upstream} was deleted on the remote, so there's nothing to pull.` }
+    : merging ? { off: 'Finish or abort the merge first.' }
+    : !hd.behind ? { off: `Up to date with ${hd.upstream} as of the last Fetch. Press Fetch to check the remote again.`, upToDate: true }
+    : { title: `Brings the ${hd.behind} new commit${hd.behind > 1 ? 's' : ''} on ${hd.upstream} (the remote copy of this branch) into your local ${hd.branch}.` };
+  const pullBtn = `<button class="ghost pull-btn" data-git="pull" ${busy || (pull.off ? 'disabled' : '')} title="${h(pull.off || pull.title)}">↓ Pull${hd.behind && !pull.off ? ` ${hd.behind}` : ''}${hd.upstream && !hd.gone ? ` <span class="from">from ${h(hd.upstream)}</span>` : ''}</button>`;
   const sync = hd.upstream
     ? (hd.gone ? `Upstream <b>${h(hd.upstream)}</b> was deleted on the remote`
       : hd.ahead || hd.behind ? `Tracking <b>${h(hd.upstream)}</b> · ${hd.ahead ? `<b>↑${hd.ahead}</b> to push` : ''} ${hd.behind ? `<b>↓${hd.behind}</b> to pull` : ''}`
@@ -810,7 +821,8 @@ function renderGit() {
           <div class="sync">${sync}</div>
           <div class="quick">
             <button class="ghost" data-git="fetch" ${busy}>Fetch</button>
-            <button class="ghost" data-git="pull" ${busy}>↓ Pull${hd.behind ? ` (${hd.behind})` : ''}</button>
+            ${pullBtn}
+            <button class="ghost" data-git="mergeFrom" ${busy || (merging || hd.detached || !g.commits.length ? 'disabled' : '')} title="Merge another branch (e.g. origin/main) into ${h(hd.branch)}">⤵ Merge from…</button>
             <button class="ghost" data-git="push" ${busy}>↑ Push${hd.ahead ? ` (${hd.ahead})` : ''}</button>
             <button class="ghost" data-git="stash" ${busy || (!g.files.length ? 'disabled' : '')} title="Put all changes aside">Stash</button>
             <button class="ghost" data-git="stashPop" ${busy || (!g.stashes.length ? 'disabled' : '')} title="${g.stashes.length ? h(g.stashes[0].msg) : 'No stashes'}">Pop stash${g.stashes.length ? ` (${g.stashes.length})` : ''}</button>
@@ -818,11 +830,26 @@ function renderGit() {
         </div>
       </div>
 
+      ${merging ? `<div class="card merge-card">
+        <header><h3>⤵ Merge in progress</h3><span class="grow"></span>
+          <button class="ghost small danger" data-git="mergeAbort" ${busy} title="Undo the merge: back to how ${h(hd.branch)} was before it">Abort merge</button>
+          <button class="primary small" data-git="mergeFinish" ${busy || (conflicts.length ? 'disabled' : '')} title="${conflicts.length ? 'Resolve the conflicts first' : 'Create the merge commit'}">Finish merge</button></header>
+        <div class="body">
+          ${merging.subject ? `<div class="mono small-text">${h(merging.subject)}</div>` : ''}
+          ${conflicts.length
+            ? `<div class="small-text"><b class="bad-text">${conflicts.length} file${conflicts.length > 1 ? 's have' : ' has'} conflicts.</b> Open ${conflicts.length > 1 ? 'each' : 'it'} in your editor, keep the right lines between the <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code> and <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code> markers and remove the markers, then press <b>+</b> to mark it resolved. Or <b>Abort merge</b> to undo it.</div>`
+            : '<div class="small-text">All conflicts are resolved. Press <b>Finish merge</b> to create the merge commit.</div>'}
+        </div>
+      </div>` : ''}
+
       <div class="card">
         <header><h3>Changes</h3><span class="muted">${g.files.length || 'clean'}</span><span class="grow"></span>
           ${unstaged.length ? `<button class="plain small" data-git="stageAll" ${busy}>Stage all</button>` : ''}
           ${staged.length ? `<button class="plain small" data-git="unstageAll" ${busy}>Unstage all</button>` : ''}</header>
         ${g.files.length ? `<ul class="files">
+          ${conflicts.length ? `<li class="group bad-text">Conflicts · ${conflicts.length}</li>${conflicts.map((f) => `<li class="conflict-row" title="${h(f.path)}: resolve it in your editor, then press + to mark it resolved">
+            <span class="st D">!</span><span class="p mono">‎${h(f.path)}</span>
+            <button class="plain small" data-git="stage" data-path="${h(f.path)}" title="Mark resolved (stage it)">+</button></li>`).join('')}` : ''}
           ${staged.length ? `<li class="group">Staged · ${staged.length}</li>${staged.map((f) => fileRow(f, true)).join('')}` : ''}
           ${unstaged.length ? `<li class="group">Not staged · ${unstaged.length}</li>${unstaged.map((f) => fileRow(f, false)).join('')}` : ''}
         </ul>` : '<div class="body muted">Working tree clean, nothing to commit.</div>'}
@@ -870,6 +897,43 @@ function renderGit() {
   watchCommitHeight();
   updateSwitchLock();
   renderAiCard();
+}
+
+/** Merge another branch into the current one: remote branches first (the usual "update my branch with main"). */
+async function mergeFrom() {
+  const g = S.git;
+  const cur = g.head.branch;
+  const remote = (g.remoteRefs || []).filter((r) => r !== g.head.upstream);
+  const local = g.branches.filter((b) => b !== cur);
+  if (!remote.length && !local.length) return toast('There is no other branch to merge from.', true);
+  const pick = ['origin/main', 'origin/master', 'origin/develop', 'main', 'master', 'develop'].find((b) => remote.includes(b) || local.includes(b)) || remote[0] || local[0];
+  const opt = (b) => `<option value="${h(b)}" ${b === pick ? 'selected' : ''}>${h(b)}</option>`;
+  $('#mergeInto').textContent = cur;
+  $('#mergeBranch').innerHTML = (remote.length ? `<optgroup label="On the remote (fetched first, so it's up to date)">${remote.map(opt).join('')}</optgroup>` : '')
+    + (local.length ? `<optgroup label="On this PC">${local.map(opt).join('')}</optgroup>` : '');
+  const hint = () => {
+    const b = $('#mergeBranch').value;
+    $('#mergeHint').innerHTML = `Brings the commits on <b class="mono">${h(b)}</b> that <b class="mono">${h(cur)}</b> doesn't have yet into ${h(cur)}. Nothing changes on ${h(b)}.
+      ${g.files.length ? '<br>⚠ You have uncommitted changes: git stops if the merge would touch those files. Commit or stash them first to be safe.' : ''}
+      <br>If both branches changed the same lines, you get conflicts to resolve, or you can abort the merge.`;
+  };
+  $('#mergeBranch').onchange = hint;
+  hint();
+  const d = $('#mergeDialog');
+  d.returnValue = 'cancel';
+  d.showModal();
+  const ok = await new Promise((resolve) => { // the button's submit or close (Esc), whichever arrives first
+    const form = d.querySelector('form');
+    const done = (v) => { d.removeEventListener('close', onClose); form.removeEventListener('submit', onSubmit); resolve(v === 'ok'); };
+    const onClose = () => done(d.returnValue);
+    const onSubmit = (ev) => done(ev.submitter?.value || 'cancel');
+    d.addEventListener('close', onClose);
+    form.addEventListener('submit', onSubmit);
+  });
+  if (!ok) return;
+  const branch = $('#mergeBranch').value;
+  const done = await gitAction({ action: 'merge', branch }, `Merge ${branch}`);
+  if (!done && S.git?.merging) toast(`Merging ${branch} stopped on conflicts: see the Merge in progress panel.`, true);
 }
 
 /** Git isn't installed: how to get it. Check again picks up a fresh install without restarting the hub. */
@@ -1030,6 +1094,13 @@ $('#gitWrap').addEventListener('click', async (ev) => {
   switch (a) {
     case 'refresh': return loadGit();
     case 'diff': return openDiff(+b.dataset.i);
+    case 'mergeFrom': return mergeFrom();
+    case 'mergeAbort': {
+      const ok = await confirmBox({ title: 'Abort the merge?', text: `${S.git.head.branch} goes back to how it was before the merge. Conflict fixes you made in these files are lost.`, ok: 'Abort merge', danger: true });
+      if (ok === 'ok') return gitAction({ action: 'mergeAbort' }, 'Abort merge');
+      return;
+    }
+    case 'mergeFinish': return gitAction({ action: 'mergeFinish' }, 'Finish merge');
     case 'clearOut': gitOut(e.id).length = 0; return renderGit();
     case 'init': return gitAction({ action: 'init' }, 'git init');
     case 'aiMessage': return aiCommitMessage();

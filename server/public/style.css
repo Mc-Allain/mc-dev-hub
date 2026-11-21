@@ -633,3 +633,10 @@ dialog.diff-dialog[open] { display: flex; }
 .diff-table tr.hunk td { background: var(--diff-hunk-bg); color: var(--muted); padding: 4px 10px; font-size: 12px; }
 .diff-table tr.hunk .ctx { color: var(--text); opacity: .75; }
 .diff-table tr.nonl td { color: var(--muted); font-style: italic; font-size: 11.5px; }
+
+/* Git: Pull names its source; merge in progress */
+.pull-btn .from { color: var(--muted); font-size: 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+.bad-text { color: var(--danger); }
+.merge-card { border-color: var(--warn); }
+.merge-card > header { background: var(--warn-bg); }
+.files li.conflict-row { cursor: default; }
