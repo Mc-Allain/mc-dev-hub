@@ -612,7 +612,8 @@ dialog.diff-dialog[open] { display: flex; }
 .diff-stat .a { color: var(--ok); } .diff-stat .d { color: var(--danger); }
 .diff-head label.check { display: flex; flex-direction: row; align-items: center; gap: 6px; color: var(--text); }
 .diff-nav { display: flex; align-items: center; gap: 6px; }
-.diff-body { flex: 1; overflow: auto; background: var(--panel); }
+.diff-main { flex: 1; min-height: 0; display: flex; }
+.diff-body { flex: 1; min-width: 0; overflow: auto; background: var(--panel); position: relative; }
 .diff-msg { padding: 24px; color: var(--muted); font-size: 13.5px; }
 .diff-table { width: 100%; border-collapse: collapse; table-layout: fixed; font: 12.5px/1.55 ui-monospace, Consolas, monospace; tab-size: 4; }
 .diff-table col.ln { width: 52px; }
@@ -640,3 +641,29 @@ dialog.diff-dialog[open] { display: flex; }
 .merge-card { border-color: var(--warn); }
 .merge-card > header { background: var(--warn-bg); }
 .files li.conflict-row { cursor: default; }
+
+/* diff: change / find toolbar and the overview ruler */
+.diff-tools { display: flex; align-items: center; gap: 16px; padding: 6px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.diff-tools[hidden] { display: none; }
+.diff-tools .grp { display: flex; align-items: center; gap: 6px; }
+.diff-tools .find input { width: 240px; padding: 3px 8px; font-size: 12.5px; }
+.diff-tools #diffChgPos { min-width: 96px; }
+.diff-tools #diffFindPos { min-width: 64px; }
+.diff-ruler { position: relative; width: 16px; flex-shrink: 0; border-left: 1px solid var(--border); background: var(--panel-2); cursor: pointer; touch-action: none; }
+.diff-ruler[hidden] { display: none; }
+.diff-ruler .marks { position: absolute; inset: 0; pointer-events: none; }
+.diff-ruler .mk { position: absolute; left: 3px; right: 3px; border-radius: 1px; }
+.diff-ruler .mk.add { background: var(--ok); }
+.diff-ruler .mk.del { background: var(--danger); }
+.diff-ruler .mk.mod { background: var(--accent); }
+.diff-ruler .mk.find { left: 0; right: 0; height: 2px; background: #d9a400; }
+.diff-ruler .mk.find.cur { height: 3px; background: #ff8c00; }
+.diff-ruler .view { position: absolute; left: 0; right: 0; background: rgba(127, 127, 127, .22); border: 1px solid rgba(127, 127, 127, .45); pointer-events: none; }
+.diff-ruler .view[hidden] { display: none; }
+.diff-table tr.flash td.code { animation: diff-flash 1s ease-out; }
+@keyframes diff-flash { from { box-shadow: inset 0 0 0 999px rgba(255, 200, 0, .28); } to { box-shadow: inset 0 0 0 999px rgba(255, 200, 0, 0); } }
+::highlight(diff-find) { background-color: rgba(255, 200, 0, .38); }
+::highlight(diff-find-cur) { background-color: rgba(255, 140, 0, .85); color: #000; }
+
+.diff-body:focus { outline: none; }
+.diff-body:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }

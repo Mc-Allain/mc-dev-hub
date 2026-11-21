@@ -312,7 +312,26 @@
 
   <dialog id="diffDialog" class="diff-dialog" aria-label="File changes">
     <div class="diff-head" id="diffHead"></div>
-    <div class="diff-body" id="diffBody"></div>
+    <div class="diff-tools" id="diffTools" hidden>
+      <span class="grp" title="Jump between the changed parts of this file">
+        <button type="button" class="ghost small" data-diff="chgPrev" title="Previous change (Shift+F7 or Alt+↑)">↑</button>
+        <button type="button" class="ghost small" data-diff="chgNext" title="Next change (F7 or Alt+↓)">↓</button>
+        <span class="small-text" id="diffChgPos"></span>
+      </span>
+      <span class="grp find">
+        <input id="diffFind" type="search" placeholder="Find in file (Ctrl+F)" spellcheck="false" autocomplete="off">
+        <span class="small-text muted" id="diffFindPos"></span>
+        <button type="button" class="ghost small" data-diff="findPrev" title="Previous match (Shift+Enter or Shift+F3)" disabled>↑</button>
+        <button type="button" class="ghost small" data-diff="findNext" title="Next match (Enter or F3)" disabled>↓</button>
+      </span>
+    </div>
+    <div class="diff-main">
+      <div class="diff-body" id="diffBody" tabindex="0" aria-label="Changes in this file"></div>
+      <div class="diff-ruler" id="diffRuler" title="Overview: green added, red removed, blue changed, yellow search matches. Click or drag to scroll." hidden>
+        <div class="marks" id="diffMarks"></div>
+        <div class="view" id="diffView" hidden></div>
+      </div>
+    </div>
   </dialog>
 
   <div id="toast" class="toast" hidden></div>
