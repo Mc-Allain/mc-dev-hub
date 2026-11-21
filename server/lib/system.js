@@ -15,6 +15,39 @@ export function run(file, args, opts = {}) {
   });
 }
 
+/** The PATH as Windows has it now (ours + HKCU + HKLM): a program installed after the hub started is on it, though not on ours. */
+export async function freshPath() {
+  if (!isWin) return process.env.PATH || '';
+  const read = async (key) => {
+    const r = await run('reg.exe', ['query', key, '/v', 'Path'], { timeout: 5000 });
+    const m = r.stdout.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.*)/i);
+    return m ? m[1].trim().replace(/%([^%]+)%/g, (all, name) => process.env[name] ?? all) : '';
+  };
+  const [user, machine] = await Promise.all([read('HKCU\\Environment'), read('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment')]);
+  return [process.env.PATH || '', user, machine].join(path.delimiter);
+}
+
+/**
+ * Git installed while the hub runs isn't on the hub's PATH yet. Looks for it on the fresh PATH and in Git for Windows'
+ * usual folders; when found, puts its folder on our PATH so every `git` call (Git tab, AI, CLI tabs) works without a restart.
+ * -> the folder added, or '' (not found)
+ */
+export async function adoptGit() {
+  if (!isWin) return '';
+  const exists = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+  const dirs = [
+    ...(await freshPath()).split(path.delimiter).map((d) => d.trim().replace(/^"|"$/g, '')).filter(Boolean),
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'cmd'),
+    path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Git', 'cmd'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'cmd'),
+  ];
+  const dir = dirs.find((d) => exists(path.join(d, 'git.exe')));
+  if (!dir) return '';
+  const cur = (process.env.PATH || '').split(path.delimiter).map((d) => d.toLowerCase());
+  if (!cur.includes(dir.toLowerCase())) process.env.PATH = dir + path.delimiter + (process.env.PATH || '');
+  return dir;
+}
+
 // Fire-and-forget a program that should outlive this server.
 function launch(file, args, opts = {}) {
   return new Promise((resolve, reject) => {

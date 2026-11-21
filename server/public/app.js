@@ -735,7 +735,7 @@ function renderGit() {
   if (!e) return;
   if (!g) { wrap.innerHTML = '<p class="muted">Loading git status…</p>'; return; }
   if (g.folderMissing) { wrap.innerHTML = '<div class="warn-box">The folder does not exist.</div>'; return; }
-  if (g.gitMissing) { wrap.innerHTML = '<div class="warn-box">Git was not found. Install Git and make sure <code>git</code> is in your PATH.</div>'; return; }
+  if (g.gitMissing) { wrap.innerHTML = gitMissingHtml(); return; }
   if (!g.isRepo) {
     wrap.innerHTML = `<div class="card"><div class="body"><p style="margin:0">This folder is not a Git repository.</p>
       <div><button class="primary" data-git="init">Initialize repository</button></div></div></div>`;
@@ -866,6 +866,24 @@ function renderGit() {
   watchCommitHeight();
   updateSwitchLock();
   renderAiCard();
+}
+
+/** Git isn't installed: how to get it. Check again picks up a fresh install without restarting the hub. */
+function gitMissingHtml() {
+  const copy = (cmd) => `<div class="ai-cmd"><code>${h(cmd)}</code><button type="button" class="plain small" data-ai-copy="${h(cmd)}">Copy</button></div>`;
+  const win = S.platform === 'win32';
+  return `<div class="card git-missing"><div class="body">
+    <div class="ai-state bad">✖ Git isn't installed on this PC.</div>
+    <p class="muted small-text" style="margin:0">The Git tab and the ✨ AI buttons use Git to read and commit your changes.</p>
+    <ol class="ai-steps">
+      ${win ? `<li>Install Git. In PowerShell or Command Prompt, with WinGet:${copy('winget install --id Git.Git -e --source winget')}
+        or download the installer from <a href="https://git-scm.com/download/win" target="_blank" rel="noopener">git-scm.com</a> (the default options are fine).</li>`
+        : `<li>Install Git from <a href="https://git-scm.com/downloads" target="_blank" rel="noopener">git-scm.com</a> or your package manager.</li>`}
+      <li>Set your name and email for commits (once per PC):${copy('git config --global user.name "Your Name"')}${copy('git config --global user.email "you@example.com"')}</li>
+      <li>Come back here and press <b>Check again</b>. No restart needed.</li>
+    </ol>
+    <div><button class="primary" data-git="refresh">Check again</button></div>
+  </div></div>`;
 }
 
 /** Remembers the height the commit message box is dragged to (kept across re-renders and restarts, for all environments). */

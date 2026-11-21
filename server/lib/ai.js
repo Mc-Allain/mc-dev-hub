@@ -8,7 +8,7 @@ import { EventEmitter } from 'node:events';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { isWin, run, killTree, openShellWindow } from './system.js';
+import { isWin, run, killTree, openShellWindow, freshPath, adoptGit } from './system.js';
 
 export const AI_MODELS = [
   { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5 (default): fast, good for everyday commits' },
@@ -23,18 +23,6 @@ const JOB_TIMEOUT = 4 * 60 * 1000;
 
 // ---------- finding Claude Code ----------
 const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
-
-/** The PATH as Windows has it now (HKCU + HKLM): a CLI installed after the hub started is on it, though not on ours. */
-async function freshPath() {
-  if (!isWin) return process.env.PATH || '';
-  const read = async (key) => {
-    const r = await run('reg.exe', ['query', key, '/v', 'Path'], { timeout: 5000 });
-    const m = r.stdout.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.*)/i);
-    return m ? m[1].trim().replace(/%([^%]+)%/g, (all, name) => process.env[name] ?? all) : '';
-  };
-  const [user, machine] = await Promise.all([read('HKCU\\Environment'), read('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment')]);
-  return [process.env.PATH || '', user, machine].join(path.delimiter);
-}
 
 /** An npm install's `claude.cmd` is a wrapper: run the package's own entry point instead (the wrapper mangles quotes). */
 function npmEntry(cmdPath) {
@@ -311,6 +299,10 @@ export class AiJobs extends EventEmitter {
     const st = await claudeStatus(true);
     if (!st.installed) throw Object.assign(new Error('Claude Code is not installed on this PC.'), { status: 400, code: 'AI_NOT_INSTALLED' });
     if (!st.loggedIn) throw Object.assign(new Error('Claude Code is installed but not signed in.'), { status: 400, code: 'AI_NOT_SIGNED_IN' });
+    // the changes are read with git: it has to be there (it may have been installed since the hub started)
+    if ((await run('git', ['--version'], { timeout: 10000 })).err?.code === 'ENOENT' && !(await adoptGit())) {
+      throw Object.assign(new Error('Git isn\'t installed on this PC. Install it (see the Git tab), then try again.'), { status: 400 });
+    }
 
     const j = { id: 'ai_' + crypto.randomBytes(5).toString('hex'), envId: env.id, kind, model, status: 'running', startedAt: Date.now(), endedAt: null, log: [], result: null, error: '', cost: null, child: null };
     this.jobs.set(j.id, j);

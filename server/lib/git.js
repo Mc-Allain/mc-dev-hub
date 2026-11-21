@@ -1,5 +1,6 @@
 // Thin wrapper around the git CLI for the Git tab.
 import { execFile } from 'node:child_process';
+import { adoptGit } from './system.js';
 
 function git(cwd, args, timeout = 120000) {
   return new Promise((resolve) => {
@@ -54,7 +55,8 @@ function parseStatus(out) {
 }
 
 export async function info(cwd) {
-  const probe = await git(cwd, ['rev-parse', '--show-toplevel']);
+  let probe = await git(cwd, ['rev-parse', '--show-toplevel']);
+  if (probe.missing && await adoptGit()) probe = await git(cwd, ['rev-parse', '--show-toplevel']); // installed since the hub started
   if (probe.missing) return { isRepo: false, gitMissing: true };
   if (!probe.ok) return { isRepo: false };
   const [status, remotes, log, branches, remoteBranches, stash, uname, uemail] = await Promise.all([
