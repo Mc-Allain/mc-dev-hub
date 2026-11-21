@@ -553,6 +553,7 @@ $('#envDelete').addEventListener('click', async () => {
   if (ok !== 'ok') return;
   try {
     await api('DELETE', `/api/envs/${e.id}`);
+    setCommitDraft(e.id, ''); // its saved commit message goes with it
     $('#envDialog').close();
     S.envId = null;
     await loadState();
@@ -820,18 +821,6 @@ function renderGit() {
           ${staged.length ? `<li class="group">Staged · ${staged.length}</li>${staged.map((f) => fileRow(f, true)).join('')}` : ''}
           ${unstaged.length ? `<li class="group">Not staged · ${unstaged.length}</li>${unstaged.map((f) => fileRow(f, false)).join('')}` : ''}
         </ul>` : '<div class="body muted">Working tree clean, nothing to commit.</div>'}
-        <div class="commit-box">
-          <textarea id="commitMsg" placeholder="Commit message" ${busy} ${store.get('commitMsgHeight', 0) ? `style="height:${store.get('commitMsgHeight', 0)}px"` : ''}>${h(S.commitDraft?.[e.id] || '')}</textarea>
-          <div class="row">
-            <label><input type="checkbox" id="commitAll" ${staged.length ? '' : 'checked'}> Stage all changes first</label>
-            <span class="grow"></span>
-            ${aiCommitButton()}
-            <button class="ghost" data-git="commit" ${busy}>Commit</button>
-            <button class="primary" data-git="commitPush" ${busy}>Commit &amp; push</button>
-          </div>
-          ${aiOffNote()}
-          <div class="ai-card" id="aiCard" hidden></div>
-        </div>
       </div>
     </div>
 
@@ -840,6 +829,20 @@ function renderGit() {
         <header><h3>${g.remotes.length > 1 ? 'Remotes' : 'Remote origin'}</h3></header>
         <div class="body">${remoteHtml}
           ${g.user.name || g.user.email ? `<div class="small-text muted">Committing as ${h(g.user.name)} ${g.user.email ? `&lt;${h(g.user.email)}&gt;` : ''}</div>` : '<div class="small-text" style="color:var(--warn-text)">No git user.name / user.email configured.</div>'}
+        </div>
+      </div>
+      <div class="card">
+        <header><h3>Commit</h3><span class="grow"></span>${aiCommitButton()}</header>
+        <div class="commit-box">
+          <textarea id="commitMsg" placeholder="Commit message" ${busy} ${store.get('commitMsgHeight', 0) ? `style="height:${store.get('commitMsgHeight', 0)}px"` : ''}>${h(S.commitDraft[e.id] || '')}</textarea>
+          <div class="row">
+            <label><input type="checkbox" id="commitAll" ${staged.length ? '' : 'checked'}> Stage all changes first</label>
+            <span class="grow"></span>
+            <button class="ghost" data-git="commit" ${busy}>Commit</button>
+            <button class="primary" data-git="commitPush" ${busy}>Commit &amp; push</button>
+          </div>
+          ${aiOffNote()}
+          <div class="ai-card" id="aiCard" hidden></div>
         </div>
       </div>
       <div class="card">
@@ -915,10 +918,18 @@ async function gitAction(body, label) {
   }
 }
 
-S.commitDraft = {};
+// commit message drafts, per environment, kept across restarts (cleared after a successful commit)
+S.commitDraft = store.get('commitDrafts', {});
+let draftSaveTimer;
+function setCommitDraft(envId, text) {
+  if (text) S.commitDraft[envId] = text; else delete S.commitDraft[envId];
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(() => store.set('commitDrafts', S.commitDraft), 300);
+}
+window.addEventListener('beforeunload', () => { clearTimeout(draftSaveTimer); store.set('commitDrafts', S.commitDraft); });
 $('#gitWrap').addEventListener('toggle', (ev) => { if (ev.target.classList?.contains('remote-more')) S.gitAddOpen = ev.target.open; }, true);
 $('#gitWrap').addEventListener('input', (ev) => {
-  if (ev.target.id === 'commitMsg') S.commitDraft[env().id] = ev.target.value;
+  if (ev.target.id === 'commitMsg') setCommitDraft(env().id, ev.target.value);
 });
 $('#gitWrap').addEventListener('change', async (ev) => {
   if (ev.target.id !== 'branchSelect') return;
@@ -1022,7 +1033,7 @@ $('#gitWrap').addEventListener('click', async (ev) => {
       const message = $('#commitMsg').value.trim();
       if (!message) { $('#commitMsg').focus(); return toast('Write a commit message first', true); }
       const ok = await gitAction({ action: 'commit', message, stageAll: $('#commitAll').checked, push: a === 'commitPush' }, a === 'commitPush' ? 'Commit & push' : 'Commit');
-      if (ok) { S.commitDraft[e.id] = ''; renderGit(); }
+      if (ok) { setCommitDraft(e.id, ''); renderGit(); }
     }
   }
 });

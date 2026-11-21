@@ -190,7 +190,7 @@ function onAiEvent(x) {
     if (job.status === 'done' && job.result?.message) {
       const prev = S.commitDraft[x.envId] || '';
       if (prev.trim() && prev !== job.result.message) S.ai.undo.set(x.envId, prev);
-      S.commitDraft[x.envId] = job.result.message;
+      setCommitDraft(x.envId, job.result.message);
       if (x.envId === env()?.id) { const ta = $('#commitMsg'); if (ta) { ta.value = job.result.message; ta.focus(); } }
       if (job.result.staged === false) { const all = $('#commitAll'); if (all && x.envId === env()?.id) all.checked = true; } // the message describes all changes
     }
@@ -252,7 +252,7 @@ document.addEventListener('click', async (ev) => {
     case 'undo': {
       const prev = S.ai.undo.get(e.id);
       if (prev == null) return;
-      S.commitDraft[e.id] = prev;
+      setCommitDraft(e.id, prev);
       const ta = $('#commitMsg'); if (ta) ta.value = prev;
       S.ai.undo.delete(e.id);
       return renderAiCard();
