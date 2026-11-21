@@ -193,7 +193,7 @@ async function gatherContext(cwd, { all = false } = {}) {
 const COMMIT_SCHEMA = {
   type: 'object',
   properties: {
-    message: { type: 'string', description: 'The full commit message: a subject line, then optionally a blank line and a short body.' },
+    message: { type: 'string', description: 'The commit message: one subject line of at most 72 characters, optionally followed by a blank line and ONE short sentence. Two sentences at most in total.' },
     source: { type: 'string', enum: ['repo-rules', 'history', 'default'], description: 'Where the style came from.' },
     rulesFile: { type: 'string', description: 'The rules file that was followed, if any; otherwise empty.' },
     notes: { type: 'string', description: 'One or two sentences for the user: what the changes are, and anything worth knowing (e.g. the changes look like two separate commits).' },
@@ -207,13 +207,14 @@ Follow the repository's own commit rules. Look in this order and report which on
 1. a rules file in the repo (listed in the context; read it if it exists),
 2. otherwise the style of the recent commit subjects shown,
 3. otherwise Conventional Commits: "type(scope): summary" with types feat, fix, refactor, docs, test, chore; imperative mood; subject at most 72 characters.
-Describe what the change does and why, based on the diff. Add a body only when the subject can't carry the important detail. Never mention secrets, tokens or file contents that look sensitive. Never read .env files or keys.`;
+Keep it short: the message is at most two sentences. Usually the subject line alone is enough; add one short body sentence (after a blank line) only when the subject can't carry the key detail. No bullet lists, no file-by-file summaries, no restating the diff.
+Say what the change does, based on the diff. Never mention secrets, tokens or file contents that look sensitive. Never read .env files or keys.`;
 
 function buildPrompt(ctx) {
   const block = (text, empty) => (text ? '```\n' + text + '\n```' : empty); // git output fenced, so its own "##" lines can't pass for headings
   const untracked = ctx.untracked.slice(0, 50).join('\n') + (ctx.untracked.length > 50 ? `\n…and ${ctx.untracked.length - 50} more` : '');
   return [
-    `Write a commit message for the ${ctx.staged ? 'STAGED changes (only those will be committed)' : 'uncommitted changes (nothing is staged, so all of them)'} on branch "${ctx.branch || '(no branch yet)'}".`,
+    `Write a short commit message (two sentences at most) for the ${ctx.staged ? 'STAGED changes (only those will be committed)' : 'uncommitted changes (nothing is staged, so all of them)'} on branch "${ctx.branch || '(no branch yet)'}".`,
     '',
     '## git status', block(ctx.status, '(clean)'),
     '', '## Rule files in this repo', ctx.rules.length ? ctx.rules.join('\n') : '(none found)',
