@@ -806,7 +806,7 @@ function renderGit() {
   const out = gitOut(e.id);
   wrap.innerHTML = `
   <div class="git-grid">
-    <div class="git-col">
+    <div class="git-col git-left">
       <div class="card">
         <header><h3>Branch</h3><span class="grow"></span><button class="plain small" data-git="refresh" ${busy}>↻ Refresh</button></header>
         <div class="body">
@@ -842,17 +842,17 @@ function renderGit() {
         </div>
       </div>` : ''}
 
-      <div class="card">
+      <div class="card changes-card">
         <header><h3>Changes</h3><span class="muted">${g.files.length || 'clean'}</span><span class="grow"></span>
           ${unstaged.length ? `<button class="plain small" data-git="stageAll" ${busy}>Stage all</button>` : ''}
           ${staged.length ? `<button class="plain small" data-git="unstageAll" ${busy}>Unstage all</button>` : ''}</header>
-        ${g.files.length ? `<ul class="files">
+        <div class="changes-scroll">${g.files.length ? `<ul class="files">
           ${conflicts.length ? `<li class="group bad-text">Conflicts · ${conflicts.length}</li>${conflicts.map((f) => `<li class="conflict-row" title="${h(f.path)}: resolve it in your editor, then press + to mark it resolved">
             <span class="st D">!</span><span class="p mono">‎${h(f.path)}</span>
             <button class="plain small" data-git="stage" data-path="${h(f.path)}" title="Mark resolved (stage it)">+</button></li>`).join('')}` : ''}
           ${staged.length ? `<li class="group">Staged · ${staged.length}</li>${staged.map((f) => fileRow(f, true)).join('')}` : ''}
           ${unstaged.length ? `<li class="group">Not staged · ${unstaged.length}</li>${unstaged.map((f) => fileRow(f, false)).join('')}` : ''}
-        </ul>` : '<div class="body muted">Working tree clean, nothing to commit.</div>'}
+        </ul>` : '<div class="body muted">Working tree clean, nothing to commit.</div>'}</div>
       </div>
     </div>
 

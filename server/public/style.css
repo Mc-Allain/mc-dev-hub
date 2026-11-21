@@ -667,3 +667,9 @@ dialog.diff-dialog[open] { display: flex; }
 
 .diff-body:focus { outline: none; }
 .diff-body:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* Git: the Changes panel fills the left column down to the bottom of the right one; its list scrolls inside */
+.git-left { align-self: stretch; }
+.changes-card { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.changes-scroll { flex: 1 1 auto; min-height: 280px; overflow: auto; contain: size; }
+.changes-scroll .files { max-height: none; overflow: visible; }
