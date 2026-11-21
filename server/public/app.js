@@ -575,7 +575,8 @@ function openLauncherDialog(l) {
   $('#lDlgTitle').textContent = l ? `Edit launcher · ${l.name}` : 'New launcher';
   $('#lDelete').hidden = !l;
   const v = l || { name: '', command: 'npm run dev', cwd: '', port: '', url: '', envText: '', openOnReady: false, autoRestart: false, kind: 'web' };
-  for (const k of ['name', 'command', 'cwd', 'url', 'envText']) f[k].value = v[k] || '';
+  for (const k of ['name', 'command', 'cwd', 'url']) f[k].value = v[k] || '';
+  setEnvRows(v.envText || '');
   f.port.value = v.port || '';
   f.openOnReady.checked = !!v.openOnReady;
   f.autoRestart.checked = !!v.autoRestart;
@@ -604,6 +605,9 @@ $('#launcherForm').addEventListener('submit', async (ev) => {
   const f = ev.target;
   const e = env();
   const app = f.kind.value === 'app';
+  const bad = $$('#envRows .env-row').map((r) => r.querySelector('.env-k').value.trim()).filter((k) => k && !ENV_NAME_RE.test(k));
+  if (bad.length) { $$('#envRows .env-k').find((i) => bad.includes(i.value.trim()))?.focus(); return toast(`"${bad[0]}" isn't a valid variable name: use letters, digits, _ . or -, not starting with a digit.`, true); }
+  f.envText.value = envRowsText();
   const body = {
     name: f.name.value.trim(), command: f.command.value.trim(), cwd: f.cwd.value.trim(), port: app ? '' : f.port.value,
     url: app ? '' : f.url.value.trim(), envText: f.envText.value, openOnReady: !app && f.openOnReady.checked, autoRestart: f.autoRestart.checked, monitor: f.monitor.checked, kind: f.kind.value,
@@ -630,6 +634,121 @@ $('#lDelete').addEventListener('click', async () => {
     await loadState();
   } catch (err) { fail(err); }
 });
+// ---------- launcher environment variables: one row per variable (name + hidden value), saved as KEY=value lines ----------
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
+let envKeepLines = []; // comment lines from the saved text, kept as they were
+function parseEnvRows(text) {
+  const rows = [];
+  envKeepLines = [];
+  for (const raw of String(text).split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*(.*)$/);
+    if (!m) { envKeepLines.push(raw); continue; }
+    let v = m[2].trim();
+    if ((v.startsWith('"') && v.endsWith('"') && v.length > 1) || (v.startsWith("'") && v.endsWith("'") && v.length > 1)) v = v.slice(1, -1);
+    rows.push({ k: m[1], v });
+  }
+  return rows;
+}
+function envRowHtml(r = { k: '', v: '' }) {
+  return `<div class="env-row">
+    <input class="env-k mono" value="${h(r.k)}" placeholder="NAME" spellcheck="false" autocomplete="off" aria-label="Variable name">
+    <span class="env-eq">=</span>
+    <div class="env-v-wrap"><input class="env-v mono" type="password" value="${h(r.v)}" placeholder="value" spellcheck="false" autocomplete="new-password" aria-label="Value">
+      <button type="button" class="plain small env-eye" title="Show the value" aria-label="Show the value">👁</button></div>
+    <button type="button" class="plain small env-del" title="Remove this variable" aria-label="Remove">✕</button>
+  </div>`;
+}
+function setEnvRows(text) {
+  const rows = parseEnvRows(text);
+  $('#envRows').innerHTML = rows.map(envRowHtml).join('') || envRowHtml();
+  $('#envShowAll').textContent = '👁 Show all';
+  updateEnvEmpty();
+}
+/** Rows back to KEY=value lines; values with outer spaces or quotes are quoted so they read back the same. */
+function envRowsText() {
+  const lines = $$('#envRows .env-row').map((r) => {
+    const k = r.querySelector('.env-k').value.trim();
+    const v = r.querySelector('.env-v').value;
+    if (!k) return null;
+    const quote = v !== v.trim() || /^(["']).*\1$/.test(v) || v.startsWith('#');
+    return `${k}=${quote ? `"${v}"` : v}`;
+  }).filter(Boolean);
+  return [...envKeepLines, ...lines].join('\n');
+}
+function updateEnvEmpty() {
+  $$('#envRows .env-row').forEach((r) => {
+    const k = r.querySelector('.env-k');
+    k.classList.toggle('bad', !!k.value.trim() && !ENV_NAME_RE.test(k.value.trim()));
+  });
+}
+function addEnvRow(r, focus = true) {
+  $('#envRows').insertAdjacentHTML('beforeend', envRowHtml(r));
+  const row = $('#envRows').lastElementChild;
+  row.scrollIntoView({ block: 'nearest' });
+  if (focus) row.querySelector(r?.k ? '.env-v' : '.env-k').focus();
+  return row;
+}
+$('#envAdd').addEventListener('click', () => addEnvRow());
+$('#envShowAll').addEventListener('click', () => {
+  const vals = $$('#envRows .env-v');
+  const show = vals.some((i) => i.type === 'password');
+  vals.forEach((i) => { i.type = show ? 'text' : 'password'; });
+  $$('#envRows .env-eye').forEach((b) => { b.classList.toggle('on', show); b.title = show ? 'Hide the value' : 'Show the value'; });
+  $('#envShowAll').textContent = show ? '🙈 Hide all' : '👁 Show all';
+});
+$('#envRows').addEventListener('click', (ev) => {
+  const eye = ev.target.closest('.env-eye');
+  if (eye) {
+    const i = eye.parentElement.querySelector('.env-v');
+    i.type = i.type === 'password' ? 'text' : 'password';
+    eye.classList.toggle('on', i.type === 'text');
+    eye.title = i.type === 'text' ? 'Hide the value' : 'Show the value';
+    return;
+  }
+  const del = ev.target.closest('.env-del');
+  if (del) {
+    const row = del.closest('.env-row');
+    if ($$('#envRows .env-row').length === 1) { row.querySelector('.env-k').value = ''; row.querySelector('.env-v').value = ''; }
+    else row.remove();
+    updateEnvEmpty();
+  }
+});
+$('#envRows').addEventListener('input', updateEnvEmpty);
+// pasting KEY=value lines (a .env file) into a name box adds them all
+$('#envRows').addEventListener('paste', (ev) => {
+  const k = ev.target.closest('.env-k');
+  if (!k) return;
+  const text = ev.clipboardData?.getData('text') || '';
+  if (!/=/.test(text)) return;
+  const keep = envKeepLines;
+  const rows = parseEnvRows(text);
+  envKeepLines = keep; // the saved text's comment lines stay; pasted comments are dropped
+  if (!rows.length) return;
+  ev.preventDefault();
+  const row = k.closest('.env-row');
+  const existing = new Map($$('#envRows .env-row').map((r) => [r.querySelector('.env-k').value.trim(), r]));
+  let first = true;
+  for (const r of rows) {
+    const same = existing.get(r.k);
+    if (same) { same.querySelector('.env-v').value = r.v; continue; } // a name that's already there gets the new value
+    if (first && !row.querySelector('.env-k').value.trim() && !row.querySelector('.env-v').value) { row.querySelector('.env-k').value = r.k; row.querySelector('.env-v').value = r.v; }
+    else addEnvRow(r, false);
+    first = false;
+  }
+  updateEnvEmpty();
+  toast(`Added ${rows.length} variable${rows.length > 1 ? 's' : ''}`);
+});
+// Enter in a value box adds the next row (instead of submitting the dialog)
+$('#envRows').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter' || !ev.target.matches('.env-k, .env-v')) return;
+  ev.preventDefault();
+  if (ev.target.matches('.env-k')) return ev.target.closest('.env-row').querySelector('.env-v').focus();
+  const row = ev.target.closest('.env-row');
+  if (row.nextElementSibling) row.nextElementSibling.querySelector('.env-k').focus(); else addEnvRow();
+});
+
 function setKind(k) {
   $('#launcherForm').kind.value = k;
   $$('#kindSeg button').forEach((b) => b.classList.toggle('active', b.dataset.kind === k));

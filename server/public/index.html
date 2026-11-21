@@ -239,9 +239,16 @@
         <label>URL to open <input name="url" placeholder="http://localhost:3000" spellcheck="false"></label>
       </div>
       <p class="hint web-only">When a port is set it's passed as <code>PORT</code>, it marks the launcher <b>Ready</b> once it answers, and it's checked before starting so you don't get "address in use" surprises.</p>
-      <label><span>Environment variables, one <code>KEY=value</code> per line</span>
-        <textarea name="envText" class="env" spellcheck="false" placeholder="NODE_ENV=development&#10;API_URL=http://localhost:4000"></textarea>
-      </label>
+      <div class="env-vars">
+        <div class="env-head"><span>Environment variables</span><span class="grow"></span>
+          <button type="button" class="plain small" id="envShowAll" title="Show or hide all values">👁 Show all</button></div>
+        <div class="env-rows" id="envRows"></div>
+        <div class="env-foot">
+          <button type="button" class="ghost small" id="envAdd">＋ Add variable</button>
+          <span class="hint">Tip: paste a whole <code>.env</code> (<code>KEY=value</code> lines) into a name box to add them all.</span>
+        </div>
+        <input type="hidden" name="envText">
+      </div>
       <p class="hint app-only" hidden>An <b>App</b> runs on this PC (a CLI tool, script, desktop app or .exe), so it has no port or URL. Its output shows in the console like any launcher.</p>
       <label class="check web-only"><input type="checkbox" name="openOnReady"> Open the URL in the browser when it's ready</label>
       <label class="check"><input type="checkbox" name="autoRestart"> Restart automatically if it crashes</label>
