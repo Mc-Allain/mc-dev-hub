@@ -1198,6 +1198,18 @@ function openApiRoutes(spec) {
 // Is a folder an API (vs a website)?
 
 const API_DEPS = ['express', 'fastify', 'hono', 'koa', '@nestjs/core', '@hapi/hapi', 'restify', 'elysia', '@trpc/server', 'apollo-server', '@apollo/server', 'polka', 'h3'];
+const APP_DEPS = ['electron', 'electron-forge', '@electron-forge/cli', 'nw', '@neutralinojs/neu'];
+/** A .NET project that isn't ASP.NET (console/WinForms/WPF/Avalonia), or a Rust/Go program without a web framework. */
+function isNativeApp(dir) {
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return false; }
+  const read = (n) => { try { return fs.readFileSync(path.join(dir, n), 'utf8').slice(0, 200000); } catch { return ''; } };
+  const csproj = names.find((n) => /\.(cs|fs|vb)proj$/i.test(n));
+  if (csproj) return !/Microsoft\.NET\.Sdk\.(Web|BlazorWebAssembly|Razor)/i.test(read(csproj));
+  if (names.includes('Cargo.toml')) return !/^\s*(actix-web|axum|rocket|warp|tide|poem|salvo)\s*=/m.test(read('Cargo.toml'));
+  if (names.includes('go.mod')) return !/(gin-gonic|labstack\/echo|gofiber|go-chi|gorilla\/mux|net\/http)/.test(read('go.mod') + names.filter((n) => n.endsWith('.go')).slice(0, 20).map(read).join('\n'));
+  return false;
+}
 const WEB_DEPS = ['next', 'nuxt', 'vite', 'react-scripts', '@angular/core', 'astro', '@sveltejs/kit', '@remix-run/dev', 'gatsby', 'parcel', '@vue/cli-service', 'webpack-dev-server'];
 
 /** First file under `dir` (depth-limited) whose relative path matches `re`. */
@@ -1245,6 +1257,11 @@ export function guessKind(dir) {
   const deps = { ...(pkg?.dependencies || {}), ...(pkg?.devDependencies || {}) };
   const web = WEB_DEPS.some((d) => deps[d]);
   const apiDeps = API_DEPS.some((d) => deps[d]);
+
+  // programs that run on the PC, not in a browser: desktop shells (even with a Vite front end), CLI packages, native projects
+  if (APP_DEPS.some((d) => deps[d]) || Object.keys(deps).some((d) => d.startsWith('@tauri-apps/'))) return 'app';
+  if (pkg?.bin && !web && !apiDeps) return 'app';
+  if (!pkg && isNativeApp(dir)) return 'app';
 
   if (web) return hasFileApiRoutes(dir) || apiDeps ? 'both' : 'web';
 

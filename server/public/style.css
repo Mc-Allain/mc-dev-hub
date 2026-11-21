@@ -744,3 +744,5 @@ dialog.diff-dialog[open] { display: flex; }
 .md-panes.split #mdText { border-right: 1px solid var(--border); }
 .md-preview { overflow: auto; padding: 20px 28px 40px; }
 .md-preview .md-doc { max-width: 860px; }
+.chip.app { color: #fff; background: #0e8a7e; border-color: transparent; font-weight: 600; }
+#kindSeg { flex-wrap: wrap; }

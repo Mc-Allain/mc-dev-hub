@@ -368,7 +368,7 @@ function renderLaunchers() {
     return `<div class="launcher ${sel?.id === l.id ? 'selected' : ''}" data-id="${l.id}">
       <span class="dot ${st.key}"></span>
       <div class="l-main">
-        <div class="l-name">${h(l.name)} ${l.kind === 'api' ? '<span class="chip api">API</span>' : l.kind === 'both' ? '<span class="chip api" title="Website with API routes">WEB + API</span>' : ''}${l.port ? `<span class="chip">:${l.port}</span>` : ''}${l.cwd ? `<span class="chip mono">${h(l.cwd)}</span>` : ''}${l.monitor ? '<span class="chip net" title="Network monitor is on. See the Network tab.">📡 NET</span>' : ''}</div>
+        <div class="l-name">${h(l.name)} ${l.kind === 'api' ? '<span class="chip api">API</span>' : l.kind === 'both' ? '<span class="chip api" title="Website with API routes">WEB + API</span>' : l.kind === 'app' ? '<span class="chip app" title="A program that runs on this PC (CLI, script, desktop app or .exe)">APP</span>' : ''}${l.port ? `<span class="chip">:${l.port}</span>` : ''}${l.cwd ? `<span class="chip mono">${h(l.cwd)}</span>` : ''}${l.monitor ? '<span class="chip net" title="Network monitor is on. See the Network tab.">📡 NET</span>' : ''}</div>
         <div class="l-cmd mono" title="${h(l.command)}">${h(l.command) || '<i>no command</i>'}</div>
       </div>
       <div class="l-state ${st.key}">${h(st.label)}${time}</div>
@@ -603,9 +603,10 @@ $('#launcherForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const f = ev.target;
   const e = env();
+  const app = f.kind.value === 'app';
   const body = {
-    name: f.name.value.trim(), command: f.command.value.trim(), cwd: f.cwd.value.trim(), port: f.port.value,
-    url: f.url.value.trim(), envText: f.envText.value, openOnReady: f.openOnReady.checked, autoRestart: f.autoRestart.checked, monitor: f.monitor.checked, kind: f.kind.value,
+    name: f.name.value.trim(), command: f.command.value.trim(), cwd: f.cwd.value.trim(), port: app ? '' : f.port.value,
+    url: app ? '' : f.url.value.trim(), envText: f.envText.value, openOnReady: !app && f.openOnReady.checked, autoRestart: f.autoRestart.checked, monitor: f.monitor.checked, kind: f.kind.value,
   };
   try {
     let saved;
@@ -632,6 +633,9 @@ $('#lDelete').addEventListener('click', async () => {
 function setKind(k) {
   $('#launcherForm').kind.value = k;
   $$('#kindSeg button').forEach((b) => b.classList.toggle('active', b.dataset.kind === k));
+  // an App runs on this PC: no port, URL or "open when ready"
+  $$('#launcherForm .web-only').forEach((el) => { el.hidden = k === 'app'; });
+  $$('#launcherForm .app-only').forEach((el) => { el.hidden = k !== 'app'; });
 }
 $('#kindSeg').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-kind]'); if (b) setKind(b.dataset.kind); });
 $('#addLauncherBtn').addEventListener('click', () => openLauncherDialog(null));

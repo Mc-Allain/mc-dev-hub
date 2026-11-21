@@ -21,13 +21,13 @@ export function cleanLauncher(input, existing = {}) {
     name: str(l.name, 80).trim() || 'launcher',
     command: str(l.command).trim(),
     cwd: str(l.cwd, 500).trim().replace(/^[.][\\/]?$/, ''),
-    port: portNum(l.port),
-    url: str(l.url, 500).trim(),
+    port: l.kind === 'app' ? null : portNum(l.port), // an App runs on this PC: no port or URL
+    url: l.kind === 'app' ? '' : str(l.url, 500).trim(),
     envText: str(l.envText, 20000),
-    openOnReady: !!l.openOnReady,
+    openOnReady: l.kind !== 'app' && !!l.openOnReady,
     autoRestart: !!l.autoRestart,
     monitor: !!l.monitor,
-    kind: ['web', 'api', 'both'].includes(l.kind) ? l.kind : '',
+    kind: ['web', 'api', 'both', 'app'].includes(l.kind) ? l.kind : '',
   };
 }
 
@@ -92,7 +92,7 @@ export function createStore(dataDir) {
   for (const env of state.environments) for (const l of env.launchers) {
     const dir = path.resolve(env.path, l.cwd || '.');
     if (!l.kind) { l.kind = guessKind(dir); guessed = true; }
-    else if (recheck && l.kind !== 'both' && guessKind(dir) === 'both') { l.kind = 'both'; guessed = true; }
+    else if (recheck && (l.kind === 'web' || l.kind === 'api') && guessKind(dir) === 'both') { l.kind = 'both'; guessed = true; }
   }
   if (recheck) { state.settings.kindCheck = 2; guessed = true; }
 

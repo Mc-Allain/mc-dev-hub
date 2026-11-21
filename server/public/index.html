@@ -226,22 +226,24 @@
         <div class="seg type-seg" id="kindSeg">
           <button type="button" data-kind="web">🌐 Website</button>
           <button type="button" data-kind="api">⚡ API</button>
-          <button type="button" data-kind="both" title="A site that also has API routes, e.g. Next.js with app/api or Express serving a page">🌐⚡ Both</button>
+          <button type="button" data-kind="both" title="A site that also has API routes, e.g. Next.js with app/api or Express serving a page">🌐⚡ Both Web and API</button>
+          <button type="button" data-kind="app" title="A program that runs on this PC rather than in a browser: a CLI tool, script, desktop app or .exe. No port or URL.">🖥 App</button>
         </div>
       </label>
       <input type="hidden" name="kind">
       <label>Working folder, relative to the environment (empty = project root)
         <div class="row"><input name="cwd" class="mono" placeholder="e.g. apps/api" spellcheck="false"><button type="button" class="ghost" id="lBrowse">Browse…</button></div>
       </label>
-      <div class="two">
+      <div class="two web-only">
         <label>Port <input name="port" type="number" min="1" max="65535" placeholder="3000"></label>
         <label>URL to open <input name="url" placeholder="http://localhost:3000" spellcheck="false"></label>
       </div>
-      <p class="hint">When a port is set it's passed as <code>PORT</code>, it marks the launcher <b>Ready</b> once it answers, and it's checked before starting so you don't get "address in use" surprises.</p>
-      <label>Environment variables, one <code>KEY=value</code> per line
+      <p class="hint web-only">When a port is set it's passed as <code>PORT</code>, it marks the launcher <b>Ready</b> once it answers, and it's checked before starting so you don't get "address in use" surprises.</p>
+      <label><span>Environment variables, one <code>KEY=value</code> per line</span>
         <textarea name="envText" class="env" spellcheck="false" placeholder="NODE_ENV=development&#10;API_URL=http://localhost:4000"></textarea>
       </label>
-      <label class="check"><input type="checkbox" name="openOnReady"> Open the URL in the browser when it's ready</label>
+      <p class="hint app-only" hidden>An <b>App</b> runs on this PC (a CLI tool, script, desktop app or .exe), so it has no port or URL. Its output shows in the console like any launcher.</p>
+      <label class="check web-only"><input type="checkbox" name="openOnReady"> Open the URL in the browser when it's ready</label>
       <label class="check"><input type="checkbox" name="autoRestart"> Restart automatically if it crashes</label>
       <label class="check"><input type="checkbox" name="monitor"> Monitor network traffic (Network tab)</label>
       <div class="dialog-actions">
