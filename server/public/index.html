@@ -60,6 +60,8 @@
           <button data-tab="api" id="apiTabBtn" hidden>API <span class="count" id="apiBadge"></span></button>
           <button data-tab="net" title="Network traffic of this environment's launchers">Network <span class="count" id="netBadge"></span></button>
           <button data-tab="git">Git <span class="count" id="gitBadge"></span></button>
+          <!-- README stays the last tab: add new tabs above this line -->
+          <button data-tab="readme" title="The project's README, formatted like on GitHub">README</button>
         </nav>
 
         <!-- Launchers -->
@@ -144,6 +146,51 @@
 
         <div class="tab-body" id="tab-git" hidden>
           <div class="git-wrap" id="gitWrap"></div>
+        </div>
+
+        <div class="tab-body" id="tab-readme" hidden>
+          <div class="md-bar" id="mdBar"></div>
+          <div class="md-scroll" id="mdScroll">
+            <div class="md-layout">
+              <article class="md-doc" id="mdDoc"></article>
+              <nav class="md-outline" id="mdOutline" hidden></nav>
+            </div>
+          </div>
+          <div class="md-edit" id="mdEdit" hidden>
+            <div class="md-toolbar" id="mdToolbar" role="toolbar" aria-label="Formatting">
+              <span class="grp">
+                <button type="button" data-fmt="h1" title="Heading 1">H1</button>
+                <button type="button" data-fmt="h2" title="Heading 2">H2</button>
+                <button type="button" data-fmt="h3" title="Heading 3">H3</button>
+              </span>
+              <span class="grp">
+                <button type="button" data-fmt="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+                <button type="button" data-fmt="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+                <button type="button" data-fmt="strike" title="Strikethrough"><s>S</s></button>
+                <button type="button" data-fmt="code" title="Inline code" class="mono">&lt;/&gt;</button>
+              </span>
+              <span class="grp">
+                <button type="button" data-fmt="link" title="Link (Ctrl+K)">🔗 Link</button>
+                <button type="button" data-fmt="image" title="Image">🖼 Image</button>
+              </span>
+              <span class="grp">
+                <button type="button" data-fmt="ul" title="Bulleted list">• List</button>
+                <button type="button" data-fmt="ol" title="Numbered list">1. List</button>
+                <button type="button" data-fmt="task" title="Checklist">☑ Tasks</button>
+              </span>
+              <span class="grp">
+                <button type="button" data-fmt="quote" title="Quote">❝ Quote</button>
+                <button type="button" data-fmt="codeblock" title="Code block">{ } Code</button>
+                <button type="button" data-fmt="table" title="Table">▦ Table</button>
+                <button type="button" data-fmt="note" title="Note box (GitHub alert)">ℹ Note</button>
+                <button type="button" data-fmt="hr" title="Divider line">― Divider</button>
+              </span>
+            </div>
+            <div class="md-panes" id="mdPanes">
+              <textarea id="mdText" spellcheck="true" aria-label="Markdown"></textarea>
+              <div class="md-preview" id="mdPrevWrap"><article class="md-doc" id="mdPrev"></article></div>
+            </div>
+          </div>
         </div>
       </section>
     </main>
@@ -344,5 +391,7 @@
   <script src="api.js"></script>
   <script src="ai.js"></script>
   <script src="diff.js"></script>
+  <script src="markdown.js"></script>
+  <script src="readme.js"></script>
 </body>
 </html>

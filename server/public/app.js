@@ -203,6 +203,7 @@ function render() {
   renderSummary();
   apiEnvChanged();
   netEnvChanged();
+  readmeEnvChanged();
   if (S.gitEnvId !== e.id) { S.git = null; S.gitEnvId = e.id; renderGit(); loadGit(true); }
   else renderGit();
 }
@@ -319,6 +320,7 @@ function renderTabs() {
   $('#tab-api').hidden = S.tab !== 'api';
   $('#tab-git').hidden = S.tab !== 'git';
   $('#tab-net').hidden = S.tab !== 'net';
+  $('#tab-readme').hidden = S.tab !== 'readme';
 }
 function showTab(tab) {
   S.tab = tab;
@@ -327,6 +329,7 @@ function showTab(tab) {
   if (S.tab === 'git') loadGit();
   else if (S.tab === 'api') renderApi();
   else if (S.tab === 'net') renderNet();
+  else if (S.tab === 'readme') { readmeEnvChanged(); if (!S.readme.data && !S.readme.error) loadReadme(); else renderReadme(); }
   else renderConsole();
 }
 $('#tabs').addEventListener('click', (ev) => {

@@ -331,6 +331,70 @@ route('GET', '/api/envs/:id/git', async ({ p }) => {
   if (!sys.pathInfo(env.path).isDir) return { isRepo: false, folderMissing: true };
   return git.info(env.path);
 });
+// ---------- README tab: the project's README (or another Markdown file it links to), and the images it shows ----------
+const README_NAMES = ['README.md', 'readme.md', 'Readme.md', 'README.markdown', 'README.mdx', 'README.txt', 'README', 'readme'];
+const IMG_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.bmp': 'image/bmp', '.avif': 'image/avif' };
+/** A file inside the environment's folder (never outside it, never a secret). -> absolute path */
+function envFile(env, rel) {
+  const r = String(rel || '').replace(/\\/g, '/').replace(/^\.?\/+/, '');
+  if (!r || r.split('/').includes('..')) throw new HttpError(400, 'Bad file path');
+  if (/(^|\/)(\.env(\..*)?|id_rsa[^/]*|[^/]*\.(pem|key|pfx|p12|keystore))$|(^|\/)secrets\//i.test(r)) throw new HttpError(403, 'That file is private');
+  const root = path.resolve(env.path);
+  const abs = path.resolve(root, r);
+  if (!abs.toLowerCase().startsWith(root.toLowerCase() + path.sep)) throw new HttpError(400, 'Bad file path');
+  return abs;
+}
+route('GET', '/api/envs/:id/doc', ({ p, q }) => {
+  const env = need(store.findEnv(p.id));
+  let rel = q.get('path') || '';
+  if (!rel) { // the README in the project's root folder
+    let names = [];
+    try { names = fs.readdirSync(env.path); } catch { throw new HttpError(404, 'The folder does not exist'); }
+    rel = README_NAMES.find((n) => names.includes(n)) || names.find((n) => /^readme(\.(md|markdown|mdx|txt))?$/i.test(n)) || '';
+    if (!rel) return { found: false };
+  }
+  if (!/\.(md|markdown|mdx|txt)$|(^|\/)readme$/i.test(rel)) throw new HttpError(400, 'Only Markdown and text files open here');
+  const abs = envFile(env, rel);
+  let st;
+  try { st = fs.statSync(abs); } catch { throw new HttpError(404, `${rel} doesn't exist`); }
+  if (!st.isFile()) throw new HttpError(400, `${rel} isn't a file`);
+  if (st.size > 2 * 1024 * 1024) throw new HttpError(413, `${rel} is over 2 MB, too large to show here`);
+  return { found: true, path: rel.replace(/\\/g, '/'), content: fs.readFileSync(abs, 'utf8'), modified: st.mtimeMs, size: st.size };
+});
+// Saves a Markdown file from the README tab's editor. create: only if it doesn't exist yet.
+// baseModified: when the file was loaded; if it changed on disk since (edited elsewhere), 409 unless force.
+route('POST', '/api/envs/:id/doc', ({ p, body }) => {
+  const env = need(store.findEnv(p.id));
+  const rel = String(body.path || '').replace(/\\/g, '/');
+  if (!/\.(md|markdown|mdx|txt)$|(^|\/)readme$/i.test(rel)) throw new HttpError(400, 'Only Markdown and text files can be saved here');
+  if (typeof body.content !== 'string') throw new HttpError(400, 'Nothing to save');
+  if (body.content.length > 2 * 1024 * 1024) throw new HttpError(413, 'Over 2 MB, too large to save from here');
+  const abs = envFile(env, rel);
+  let st = null;
+  try { st = fs.statSync(abs); } catch { /* new file */ }
+  if (body.create && st) throw new HttpError(409, `${rel} already exists`, { code: 'EXISTS' });
+  if (!body.create && !st) throw new HttpError(404, `${rel} no longer exists. Save it as a new file?`, { code: 'GONE' });
+  if (st && !body.force && body.baseModified && Math.abs(st.mtimeMs - body.baseModified) > 1) {
+    throw new HttpError(409, `${rel} was changed outside MC Dev Hub since you opened it.`, { code: 'CHANGED' });
+  }
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, body.content, 'utf8');
+  const now = fs.statSync(abs);
+  return { ok: true, path: rel, modified: now.mtimeMs, size: now.size };
+});
+route('GET', '/api/envs/:id/asset', ({ p, q, res }) => {
+  const env = need(store.findEnv(p.id));
+  const abs = envFile(env, q.get('path'));
+  const type = IMG_MIME[path.extname(abs).toLowerCase()];
+  if (!type) throw new HttpError(415, 'Only images are served');
+  let st;
+  try { st = fs.statSync(abs); } catch { throw new HttpError(404, 'Not found'); }
+  if (!st.isFile() || st.size > 20 * 1024 * 1024) throw new HttpError(404, 'Not found');
+  // an SVG shown through <img> can't run scripts; this header keeps it that way if opened directly
+  res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" });
+  fs.createReadStream(abs).pipe(res);
+});
+
 route('GET', '/api/envs/:id/git/diff', async ({ p, q }) => {
   const env = need(store.findEnv(p.id));
   const flag = (k) => q.get(k) === '1';
@@ -515,6 +579,7 @@ const server = http.createServer(async (req, res) => {
       const body = req.method === 'GET' ? {} : await readBody(req);
       const p = Object.fromEntries(Object.entries(m.groups || {}).map(([k, v]) => [k, decodeURIComponent(v)]));
       const out = await r.fn({ req, res, p, q: url.searchParams, body });
+      if (res.headersSent || res.writableEnded) return; // the route answered itself (e.g. a file)
       return send(res, 200, out);
     }
     throw new HttpError(404, 'Unknown endpoint');
