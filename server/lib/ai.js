@@ -161,7 +161,7 @@ async function git(cwd, args) { return run('git', ['-c', 'core.quotepath=off', .
 const excludes = SECRET_PATTERNS.map((p) => `:(exclude,glob)**/${p}`);
 
 /** Status, the diff (staged if anything is staged, otherwise everything), recent history, and which rule files exist. */
-async function gatherContext(cwd) {
+async function gatherContext(cwd, { all = false } = {}) {
   const [status, branch, stagedNames, log, branches] = await Promise.all([
     git(cwd, ['status', '--short', '--branch']),
     git(cwd, ['branch', '--show-current']),
@@ -169,7 +169,7 @@ async function gatherContext(cwd) {
     git(cwd, ['log', '-n', '20', '--pretty=format:%s']),
     git(cwd, ['for-each-ref', '--count=20', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads', 'refs/remotes']),
   ]);
-  const staged = !!stagedNames.stdout.trim();
+  const staged = !all && !!stagedNames.stdout.trim(); // all: every uncommitted change, staged or not (a new branch takes them all)
   const diffArgs = staged ? ['diff', '--cached'] : ['diff', 'HEAD'];
   let diff = await git(cwd, [...diffArgs, '--stat', '--', '.', ...excludes]);
   let full = await git(cwd, [...diffArgs, '--', '.', ...excludes]);
@@ -225,6 +225,57 @@ function buildPrompt(ctx) {
   ].join('\n');
 }
 
+/** "Style: …" in the log: where the commit message / branch name style came from. */
+function styleVia(out, what) {
+  const fallback = what === 'branch' ? 'type/short-description (no rules or clear branch pattern found)' : 'Conventional Commits (no rules or clear history found)';
+  return { 'repo-rules': `the repo's rules${out.rulesFile ? ` (${out.rulesFile})` : ''}`, history: what === 'branch' ? 'the repo\'s existing branch names' : 'the repo\'s recent commit history', default: fallback }[out.source] || out.source;
+}
+
+const BRANCH_SCHEMA = {
+  type: 'object',
+  properties: {
+    name: { type: 'string', description: 'The new branch name only, e.g. feat/add-login-page. Lowercase, words joined by dashes, no spaces.' },
+    source: { type: 'string', enum: ['repo-rules', 'history', 'default'], description: 'Where the naming style came from.' },
+    rulesFile: { type: 'string', description: 'The rules file that was followed, if any; otherwise empty.' },
+    notes: { type: 'string', description: 'One or two sentences for the user: what the changes are about, and why this name.' },
+  },
+  required: ['name', 'source', 'rulesFile', 'notes'],
+  additionalProperties: false,
+};
+
+const BRANCH_SYSTEM = `You name new git branches inside MC Dev Hub, a local developer tool. You only read: never edit files, create branches, stage, commit or push.
+Name the branch after what the uncommitted changes do. Follow the repository's own branch naming rules. Look in this order and report which one you used:
+1. a rules file in the repo (listed in the context; read it if it exists and look for branch naming rules),
+2. otherwise the pattern of the existing branch names shown (prefixes, separators, ticket or iteration numbers),
+3. otherwise "type/short-description": type is feat, fix, refactor, docs, test or chore; the description is 2 to 5 lowercase words joined by dashes.
+Never use main, master, develop or a name from the list of existing branches. Keep it under 60 characters, with only lowercase letters, digits, "/", "-", "_" and ".". Never mention secrets, tokens or file contents that look sensitive. Never read .env files or keys.`;
+
+function buildBranchPrompt(ctx, taken) {
+  const block = (text, empty) => (text ? '```\n' + text + '\n```' : empty);
+  const untracked = ctx.untracked.slice(0, 50).join('\n') + (ctx.untracked.length > 50 ? `\n…and ${ctx.untracked.length - 50} more` : '');
+  return [
+    `Suggest a name for a new branch, created from "${ctx.branch || '(no branch yet)'}", that will carry all of these uncommitted changes.`,
+    '',
+    '## git status', block(ctx.status, '(clean)'),
+    '', '## Rule files in this repo', ctx.rules.length ? ctx.rules.join('\n') : '(none found)',
+    '', '## Existing local branches (the name must not be one of these)', block(taken.join('\n'), '(none)'),
+    '', '## Recent branches, local and remote', block(ctx.branches, '(none)'),
+    '', '## Recent commit subjects', block(ctx.log, '(no commits yet)'),
+    '', '## Diff summary', block(ctx.stat, '(no tracked changes)'),
+    ctx.untracked.length ? `\n## New files not tracked yet\n${block(untracked)}` : '',
+    '', `## Diff${ctx.truncated ? ' (cut off; use git diff on specific files if you need more)' : ''}`, block(ctx.diff, '(none)'),
+  ].join('\n');
+}
+
+async function localBranches(cwd) {
+  return (await git(cwd, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'])).stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+}
+/** Git's own check of a branch name. */
+async function validBranchName(cwd, name) {
+  if (!/^[\w./-]{1,100}$/.test(name) || name.startsWith('-')) return false;
+  return (await git(cwd, ['check-ref-format', '--branch', name])).code === 0;
+}
+
 // ---------- jobs ----------
 export class AiJobs extends EventEmitter {
   constructor() {
@@ -252,43 +303,83 @@ export class AiJobs extends EventEmitter {
     this.emit('event', { jobId: j.id, envId: j.envId, type: 'done', job: this.snapshot(j.id) });
   }
 
-  async commitMessage(env, model) {
+  /** Starts one AI job for an environment (one at a time per environment). work(j, st) does the job's steps. */
+  async #start(env, model, kind, work) {
     const running = this.current(env.id);
     if (running && running.status === 'running') throw Object.assign(new Error('AI is already working on this environment'), { status: 409 });
     const st = await claudeStatus(true);
     if (!st.installed) throw Object.assign(new Error('Claude Code is not installed on this PC.'), { status: 400, code: 'AI_NOT_INSTALLED' });
     if (!st.loggedIn) throw Object.assign(new Error('Claude Code is installed but not signed in.'), { status: 400, code: 'AI_NOT_SIGNED_IN' });
 
-    const j = { id: 'ai_' + crypto.randomBytes(5).toString('hex'), envId: env.id, kind: 'commit-message', model, status: 'running', startedAt: Date.now(), endedAt: null, log: [], result: null, error: '', cost: null, child: null };
+    const j = { id: 'ai_' + crypto.randomBytes(5).toString('hex'), envId: env.id, kind, model, status: 'running', startedAt: Date.now(), endedAt: null, log: [], result: null, error: '', cost: null, child: null };
     this.jobs.set(j.id, j);
     this.byEnv.set(env.id, j.id);
     this.emit('event', { jobId: j.id, envId: j.envId, type: 'start', job: this.snapshot(j.id) });
+    work(j, st).catch((err) => this.#finish(j, 'error', { error: err.message, ...(err.cost != null ? { cost: err.cost } : {}) }));
+    return this.snapshot(j.id);
+  }
 
-    (async () => {
+  /** Writes a commit message for the current changes. Nothing is committed. */
+  commitMessage(env, model) {
+    return this.#start(env, model, 'commit-message', async (j, st) => {
       this.#log(j, 'step', `Reading the changes in ${env.name}…`);
       const ctx = await gatherContext(env.path);
-      if (!ctx.stat && !ctx.untracked.length && !ctx.diff) {
-        return this.#finish(j, 'error', { error: 'There are no changes to describe.' });
-      }
+      if (!ctx.stat && !ctx.untracked.length && !ctx.diff) return this.#finish(j, 'error', { error: 'There are no changes to describe.' });
       this.#log(j, 'step', `${ctx.staged ? 'Staged' : 'All uncommitted'} changes${ctx.truncated ? ' (diff cut to 60 kB)' : ''} · rules: ${ctx.rules.length ? ctx.rules.join(', ') : 'none written, will follow the commit history'}`);
-      this.#log(j, 'step', `Asking ${(AI_MODELS.find((m) => m.id === model)?.label.split(/[:(]/)[0] || model).trim()} via Claude Code ${st.version}…`);
+      const r = await this.#ask(j, env, st, { system: SYSTEM, schema: COMMIT_SCHEMA, prompt: buildPrompt(ctx) });
+      if (!r) return; // cancelled
+      const { out, cost } = r;
+      if (!out || typeof out.message !== 'string' || !out.message.trim()) return this.#finish(j, 'error', { cost, error: 'Claude Code answered, but not with a commit message.' });
+      this.#log(j, 'done', `Commit message ready. Style: ${styleVia(out, 'commit')}.`);
+      if (out.notes) this.#log(j, 'say', out.notes);
+      this.#finish(j, 'done', { cost, result: { message: out.message.trim(), source: out.source, rulesFile: out.rulesFile || '', notes: out.notes || '', staged: ctx.staged } });
+    });
+  }
 
+  /** Suggests a name for a new branch from all uncommitted changes. Nothing is created: the person confirms the name first. */
+  branchName(env, model) {
+    return this.#start(env, model, 'branch-name', async (j, st) => {
+      this.#log(j, 'step', `Reading the changes in ${env.name}…`);
+      const ctx = await gatherContext(env.path, { all: true });
+      if (!ctx.stat && !ctx.untracked.length && !ctx.diff) return this.#finish(j, 'error', { error: 'There are no changes to name a branch after. Make some changes first, or use + New branch.' });
+      this.#log(j, 'step', `All uncommitted changes${ctx.truncated ? ' (diff cut to 60 kB)' : ''} · rules: ${ctx.rules.length ? ctx.rules.join(', ') : 'none written, will follow the branch names here'}`);
+      const taken = await localBranches(env.path);
+      const r = await this.#ask(j, env, st, { system: BRANCH_SYSTEM, schema: BRANCH_SCHEMA, prompt: buildBranchPrompt(ctx, taken) });
+      if (!r) return; // cancelled
+      const { out, cost } = r;
+      const name = String(out?.name || '').trim();
+      if (!name) return this.#finish(j, 'error', { cost, error: 'Claude Code answered, but not with a branch name.' });
+      if (!(await validBranchName(env.path, name))) return this.#finish(j, 'error', { cost, error: `Claude suggested "${name}", which git doesn't accept as a branch name. Try again, or use + New branch.` });
+      const exists = taken.includes(name);
+      if (exists) this.#log(j, 'warn', `A branch named ${name} already exists: change the name before creating it.`);
+      this.#log(j, 'done', `Branch name ready: ${name}. Style: ${styleVia(out, 'branch')}.`);
+      if (out.notes) this.#log(j, 'say', out.notes);
+      this.#finish(j, 'done', { cost, result: { name, exists, source: out.source, rulesFile: out.rulesFile || '', notes: out.notes || '', from: ctx.branch } });
+    });
+  }
+
+  /** Runs Claude Code headless and read-only in the environment's folder, streaming its steps into the job log.
+   *  -> { out, cost }, or null when the job was cancelled; throws (with .cost) when it fails. */
+  #ask(j, env, st, { system, schema, prompt }) {
+    this.#log(j, 'step', `Asking ${(AI_MODELS.find((m) => m.id === j.model)?.label.split(/[:(]/)[0] || j.model).trim()} via Claude Code ${st.version}…`);
+    return new Promise((resolve, reject) => {
+      const fail = (error, cost = null) => reject(Object.assign(new Error(error), { cost }));
       const deny = SECRET_PATTERNS.flatMap((p) => [`Read(./${p})`, `Read(./**/${p})`]);
       const args = [
-        '-p', '--model', model, '--output-format', 'stream-json', '--verbose', '--no-session-persistence',
+        '-p', '--model', j.model, '--output-format', 'stream-json', '--verbose', '--no-session-persistence',
         '--setting-sources', 'user', // the user's own Claude settings, not the repo's (no repo hooks or plugins)
         '--tools', 'Read,Grep,Glob,Bash',
         '--allowedTools', 'Read', 'Grep', 'Glob', 'Bash(git status:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git branch:*)',
         '--disallowedTools', ...deny,
-        '--append-system-prompt', SYSTEM,
-        '--json-schema', JSON.stringify(COMMIT_SCHEMA),
+        '--append-system-prompt', system,
+        '--json-schema', JSON.stringify(schema),
       ];
       const s = claudeSpawnArgs(st.path, args);
       const child = spawn(s.file, s.args, { cwd: env.path, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' } });
       j.child = child;
       j.timer = setTimeout(() => { this.#log(j, 'error', 'Stopped: it took longer than 4 minutes.'); killTree(child.pid); }, JOB_TIMEOUT);
       child.stdin.on('error', () => {});
-      child.stdin.end(buildPrompt(ctx));
+      child.stdin.end(prompt);
 
       let buf = '';
       let stderr = '';
@@ -321,28 +412,19 @@ export class AiJobs extends EventEmitter {
       });
       child.stderr.setEncoding('utf8');
       child.stderr.on('data', (d) => { stderr += d; });
-      child.on('error', (err) => this.#finish(j, 'error', { error: `Could not start Claude Code: ${err.message}` }));
+      child.on('error', (err) => fail(`Could not start Claude Code: ${err.message}`));
       child.on('close', (code) => {
         j.child = null;
-        if (j.endedAt) return;
-        if (j.cancelled) return this.#finish(j, 'cancelled', { error: 'Cancelled.' });
-        if (!final) return this.#finish(j, 'error', { error: (stderr.trim().split(/\r?\n/).pop() || `Claude Code exited with code ${code}`).slice(0, 500) });
+        if (j.endedAt) return resolve(null);
+        if (j.cancelled) { this.#finish(j, 'cancelled', { error: 'Cancelled.' }); return resolve(null); }
+        if (!final) return fail((stderr.trim().split(/\r?\n/).pop() || `Claude Code exited with code ${code}`).slice(0, 500));
         const cost = typeof final.total_cost_usd === 'number' ? final.total_cost_usd : null;
-        if (final.is_error || final.subtype !== 'success') {
-          return this.#finish(j, 'error', { cost, error: String(final.result || final.subtype || 'Claude Code reported an error').slice(0, 500) });
-        }
+        if (final.is_error || final.subtype !== 'success') return fail(String(final.result || final.subtype || 'Claude Code reported an error').slice(0, 500), cost);
         let out = final.structured_output;
         if (!out) { try { out = JSON.parse(final.result); } catch { out = null; } }
-        if (!out || typeof out.message !== 'string' || !out.message.trim()) {
-          return this.#finish(j, 'error', { cost, error: 'Claude Code answered, but not with a commit message.' });
-        }
-        const via = { 'repo-rules': `the repo's rules${out.rulesFile ? ` (${out.rulesFile})` : ''}`, history: 'the repo\'s recent commit history', default: 'Conventional Commits (no rules or clear history found)' }[out.source] || out.source;
-        this.#log(j, 'done', `Commit message ready. Style: ${via}.`);
-        if (out.notes) this.#log(j, 'say', out.notes);
-        this.#finish(j, 'done', { cost, result: { message: out.message.trim(), source: out.source, rulesFile: out.rulesFile || '', notes: out.notes || '', staged: ctx.staged } });
+        resolve({ out, cost });
       });
-    })().catch((err) => this.#finish(j, 'error', { error: err.message }));
-    return this.snapshot(j.id);
+    });
   }
 
   async cancel(id) {

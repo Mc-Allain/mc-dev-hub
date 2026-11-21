@@ -413,12 +413,15 @@ route('POST', '/api/ai/sign-out', async () => {
   return aiStatus();
 });
 route('GET', '/api/envs/:id/ai', ({ p }) => { need(store.findEnv(p.id)); return { job: aiJobs.current(p.id) }; });
-route('POST', '/api/envs/:id/ai/commit-message', async ({ p }) => {
-  const env = need(store.findEnv(p.id));
-  if (!store.state.settings.aiEnabled) throw new HttpError(400, 'AI in the Git tab is turned off. Turn it on in Settings.', { code: 'AI_OFF' });
-  try { return await aiJobs.commitMessage(env, store.state.settings.aiModel || DEFAULT_AI_MODEL); }
-  catch (e) { throw new HttpError(e.status || 500, e.message, e.code ? { code: e.code } : undefined); }
-});
+// AI jobs: commit-message writes a message into the box; branch-name suggests a name the person confirms before it's created
+for (const [kind, method] of [['commit-message', 'commitMessage'], ['branch-name', 'branchName']]) {
+  route('POST', `/api/envs/:id/ai/${kind}`, async ({ p }) => {
+    const env = need(store.findEnv(p.id));
+    if (!store.state.settings.aiEnabled) throw new HttpError(400, 'AI in the Git tab is turned off. Turn it on in Settings.', { code: 'AI_OFF' });
+    try { return await aiJobs[method](env, store.state.settings.aiModel || DEFAULT_AI_MODEL); }
+    catch (e) { throw new HttpError(e.status || 500, e.message, e.code ? { code: e.code } : undefined); }
+  });
+}
 route('POST', '/api/ai/sign-in', async ({ body }) => {
   try { return await openSignIn(String(body.shell || '')); }
   catch (e) { throw new HttpError(e.status || 500, e.message); }

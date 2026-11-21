@@ -800,6 +800,7 @@ function renderGit() {
               ? `<select id="branchSelect" ${busy} title="Switch branch">${opts}</select>`
               : `<span class="no-branch">No branches yet${hd.branch ? `: <b>${h(hd.branch)}</b> is created by the first commit` : ''}.</span>`}
             <button class="ghost small" data-git="newBranch" ${busy}>+ New branch</button>
+            ${aiBranchButton()}
           </div>
           <div class="switch-lock" id="switchLock" hidden></div>
           <div class="sync">${sync}</div>
@@ -1009,6 +1010,7 @@ $('#gitWrap').addEventListener('click', async (ev) => {
     case 'clearOut': gitOut(e.id).length = 0; return renderGit();
     case 'init': return gitAction({ action: 'init' }, 'git init');
     case 'aiMessage': return aiCommitMessage();
+    case 'aiBranch': return aiBranchName();
     case 'fetch': return gitAction({ action: 'fetch' }, 'Fetch');
     case 'pull': return gitAction({ action: 'pull' }, 'Pull');
     case 'push': return gitAction({ action: 'push' }, 'Push');

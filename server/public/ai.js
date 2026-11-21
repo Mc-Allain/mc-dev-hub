@@ -105,12 +105,20 @@ function aiCommitButton() {
   if (!S.ai.status?.enabled) return '';
   const job = S.ai.jobs.get(env()?.id);
   const running = job?.status === 'running';
-  return `<button class="ghost ai-btn" data-git="aiMessage" ${running ? 'disabled' : ''} title="Claude reads your changes and writes a commit message into the box. Nothing is committed.">✨ ${running ? 'Writing…' : 'Commit message'}</button>`;
+  const mine = running && job.kind !== 'branch-name';
+  return `<button class="ghost ai-btn" data-git="aiMessage" ${running ? 'disabled' : ''} title="Claude reads your changes and writes a commit message into the box. Nothing is committed.">✨ ${mine ? 'Writing…' : 'Commit message'}</button>`;
+}
+function aiBranchButton() {
+  if (!S.ai.status?.enabled) return '';
+  const job = S.ai.jobs.get(env()?.id);
+  const running = job?.status === 'running';
+  const mine = running && job.kind === 'branch-name';
+  return `<button class="ghost small ai-btn" data-git="aiBranch" ${running || S.gitBusy ? 'disabled' : ''} title="Claude reads your uncommitted changes and suggests a branch name. You confirm or edit it before the branch is created.">✨ ${mine ? 'Naming…' : 'Branch from changes'}</button>`;
 }
 /** Shown only while AI is off, so people know the feature exists. */
 function aiOffNote() {
   const off = !!S.ai.status && !S.ai.status.enabled;
-  return `<div class="ai-off-note" id="aiOffNote" ${off ? '' : 'hidden'}>✨ Claude can write commit messages from your changes. Turn on
+  return `<div class="ai-off-note" id="aiOffNote" ${off ? '' : 'hidden'}>✨ Claude can write commit messages and name new branches from your changes. Turn on
     <b>AI in the Git tab</b> in <button type="button" class="linklike" data-ai="settings">Settings</button>.</div>`;
 }
 function updateAiButton() {
@@ -118,19 +126,23 @@ function updateAiButton() {
   if (n) n.outerHTML = aiOffNote();
   const b = $('#gitWrap [data-git="aiMessage"]');
   if (b) b.outerHTML = aiCommitButton();
+  const bb = $('#gitWrap [data-git="aiBranch"]');
+  if (bb) bb.outerHTML = aiBranchButton();
 }
 
-async function aiCommitMessage() {
+const aiCommitMessage = () => aiRun('commit-message');
+const aiBranchName = () => aiRun('branch-name');
+async function aiRun(kind) {
   const e = env();
   if (!e) return;
   if (!aiReady()) { await loadAiStatus(true); }
   if (!aiReady()) { S.ai.jobs.set(e.id, { setup: true }); return renderAiCard(); }
   try {
-    const job = await api('POST', `/api/envs/${e.id}/ai/commit-message`);
+    const job = await api('POST', `/api/envs/${e.id}/ai/${kind}`);
     S.ai.jobs.set(e.id, job);
   } catch (err) {
     if (/^AI_/.test(err.data?.code || '')) { await loadAiStatus(true); S.ai.jobs.set(e.id, { setup: true, error: err.message }); }
-    else S.ai.jobs.set(e.id, { status: 'error', error: err.message, log: [], model: S.ai.status?.model });
+    else S.ai.jobs.set(e.id, { kind, status: 'error', error: err.message, log: [], model: S.ai.status?.model });
   }
   renderAiCard();
   updateAiButton();
@@ -159,16 +171,22 @@ function renderAiCard() {
   const secs = job.startedAt ? Math.round(((job.endedAt || Date.now()) - job.startedAt) / 1000) : 0;
   const state = running ? 'working…' : job.status === 'done' ? `done in ${secs}s` : job.status === 'cancelled' ? 'cancelled' : 'failed';
   const undo = S.ai.undo.get(e.id);
-  el.innerHTML = `<div class="ai-head"><b>✨ AI · ${h(aiModelName(job.model))}</b><span class="ai-status ${h(job.status)}">${state}</span><span class="grow"></span>
+  const branch = job.kind === 'branch-name';
+  const what = branch ? 'Branch name' : 'Commit message';
+  const doneText = branch
+    ? `Suggested <code>${h(job.result?.name)}</code>${job.result?.from ? ` from <b>${h(job.result.from)}</b>` : ''}. Nothing is created until you confirm.`
+    : 'Written into the message box. Edit it as you like, then press Commit.';
+  el.innerHTML = `<div class="ai-head"><b>✨ ${what} · ${h(aiModelName(job.model))}</b><span class="ai-status ${h(job.status)}">${state}</span><span class="grow"></span>
       ${running ? '<button class="ghost small" data-ai="cancel">Cancel</button>' : '<button class="plain small" data-ai="close" title="Hide">✕</button>'}</div>
     <div class="ai-log" id="aiLog">${(job.log || []).map(aiLine).join('')}${running ? '<div class="ai-line step pending"><span class="ico">…</span><span class="txt">Claude is working</span></div>' : ''}</div>
     ${job.status === 'error' ? `<div class="ai-error">✖ ${h(job.error)}</div>` : ''}
     ${!running ? `<div class="ai-foot">
-      ${job.status === 'done' ? `<span class="muted small-text">Written into the message box. Edit it as you like, then press Commit.</span>` : ''}
+      ${job.status === 'done' ? `<span class="muted small-text">${doneText}</span>` : ''}
       <span class="grow"></span>
       ${job.cost != null ? `<span class="muted small-text" title="Usage reported by Claude Code">≈ $${job.cost.toFixed(4)}</span>` : ''}
-      ${undo != null ? '<button class="plain small" data-ai="undo" title="Put back the message you had typed">↶ My message</button>' : ''}
-      <button class="ghost small" data-ai="again">↻ Write another</button></div>` : ''}`;
+      ${!branch && undo != null ? '<button class="plain small" data-ai="undo" title="Put back the message you had typed">↶ My message</button>' : ''}
+      <button class="ghost small" data-ai="again">↻ ${branch ? 'Suggest another' : 'Write another'}</button>
+      ${branch && job.status === 'done' ? '<button class="primary small" data-ai="create-branch">Create branch…</button>' : ''}</div>` : ''}`;
   const log = $('#aiLog');
   if (log) log.scrollTop = log.scrollHeight;
 }
@@ -196,7 +214,27 @@ function onAiEvent(x) {
     }
   }
   S.ai.jobs.set(x.envId, job);
-  if (x.envId === env()?.id && S.tab === 'git') { renderAiCard(); updateAiButton(); }
+  if (x.envId === env()?.id && S.tab === 'git') {
+    renderAiCard(); updateAiButton();
+    // a fresh branch name: ask right away (the card keeps a "Create branch…" button if the dialog is dismissed)
+    if (x.type === 'done' && job.kind === 'branch-name' && job.status === 'done') aiCreateBranch();
+  }
+}
+
+/** Asks for the branch name (Claude's suggestion, editable), then creates and switches to it. Uncommitted changes come along. */
+async function aiCreateBranch() {
+  const e = env();
+  const job = e && S.ai.jobs.get(e.id);
+  if (!job?.result?.name || $('#confirmDialog').open) return;
+  const r = job.result;
+  const name = await confirmBox({
+    title: '✨ New branch from your changes',
+    text: `${r.notes ? r.notes + '\n\n' : ''}Created from ${S.git?.head?.branch || r.from || 'the current branch'} and switched to. Your uncommitted changes come along.${r.exists ? '\n\n⚠ A branch with this name already exists: change it first.' : ''}`,
+    ok: 'Create branch', input: { value: r.name, placeholder: 'feat/my-change' },
+  });
+  if (!name || !name.trim() || env()?.id !== e.id) return;
+  const ok = await gitAction({ action: 'newBranch', branch: name.trim() }, 'New branch');
+  if (ok) { S.ai.jobs.delete(e.id); renderAiCard(); }
 }
 
 // ---------- events ----------
@@ -216,7 +254,8 @@ document.addEventListener('click', async (ev) => {
   switch (a.dataset.ai) {
     case 'close': S.ai.jobs.delete(e.id); S.ai.undo.delete(e.id); return renderAiCard();
     case 'cancel': if (job?.id) api('POST', `/api/ai/jobs/${job.id}/cancel`).catch(fail); return;
-    case 'again': return aiCommitMessage();
+    case 'again': return aiRun(job?.kind === 'branch-name' ? 'branch-name' : 'commit-message');
+    case 'create-branch': return aiCreateBranch();
     case 'recheck': case 'recheck-settings': await loadAiStatus(true); if (aiReady() && job?.setup) { S.ai.jobs.delete(e.id); renderAiCard(); toast('Claude Code is ready'); } return;
     case 'settings': $('#settingsBtn').click(); return;
     case 'sign-in': {
