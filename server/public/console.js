@@ -119,6 +119,7 @@ function paneHtml(p, i, L) {
       <div class="pane-tabs">${p.tabs.map((t) => tabHtml(t, p.active === t)).join('')}<button type="button" class="tab-add" data-cact="add" title="New CLI: a command line in a launcher's folder">＋</button></div>
       <div class="pane-tools">
         <button type="button" class="small" data-cact="stopCli" hidden title="Stop the running command (Ctrl+C)">■ <span class="lbl">Stop</span></button>
+        <button type="button" class="small" data-cact="restartCli" hidden title="Restart: stop the command and run it again with Windows' current environment variables. The tab and its output stay.">↻ <span class="lbl">Restart</span></button>
         <button type="button" class="small follow${p.follow !== false ? ' on' : ''}" data-cact="follow" title="Keep scrolled to the newest output">⤓ <span class="lbl">Follow</span></button>
         <button type="button" class="small" data-cact="terminal" title="Open a terminal in this folder">⌨ <span class="lbl">Terminal</span></button>
         <button type="button" class="small" data-cact="copy" title="Copy the output">⧉ <span class="lbl">Copy</span></button>
@@ -190,6 +191,7 @@ function updatePaneControls(i) {
   const input = $('.con-text', el);
   const prompt = $('.con-prompt', el);
   $('[data-cact="stopCli"]', el).hidden = !(x?.kind === 'cli' && x.c.running);
+  $('[data-cact="restartCli"]', el).hidden = x?.kind !== 'cli';
   $('[data-cact="terminal"]', el).disabled = !x;
   if (!x) { input.disabled = true; input.placeholder = ''; prompt.textContent = '›'; return; }
   if (x.kind === 'out') {
@@ -380,6 +382,7 @@ async function paneAction(act, i, el, ev) {
   if (!x) return;
   const id = tabLog(p.active);
   if (act === 'stopCli') return api('POST', `/api/clis/${id}/stop`).catch(fail);
+  if (act === 'restartCli') return api('POST', `/api/clis/${id}/restart`).catch(fail);
   if (act === 'clear') return api('POST', x.kind === 'cli' ? `/api/clis/${id}/clear` : `/api/launchers/${id}/clear`).catch(fail);
   if (act === 'terminal') {
     return (x.kind === 'cli' ? api('POST', `/api/clis/${id}/terminal`) : api('POST', `/api/envs/${env().id}/open`, { what: 'terminal', launcherId: id })).catch(fail);

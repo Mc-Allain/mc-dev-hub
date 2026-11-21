@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { isWin, killTree, cliShellCommand } from './system.js';
+import { isWin, killTree, cliShellCommand, freshEnv, withVars } from './system.js';
 import { parseEnvText, launcherDir } from './procs.js';
 
 const MAX_LINES = 5000;
@@ -94,9 +94,10 @@ export class CliManager extends EventEmitter {
   }
 
   /** Runs a command, or sends the line to the command that's running. */
-  run(id, text) {
+  async run(id, text) {
     const s = this.sessions.get(id);
     if (!s) throw Object.assign(new Error('This CLI was closed'), { status: 404 });
+    if (s.starting) throw Object.assign(new Error('The previous command is still starting'), { status: 409 });
     if (s.child) {
       if (!s.child.stdin?.writable) throw Object.assign(new Error('The command is not accepting input'), { status: 409 });
       this.#push(s, [`› ${text}`], 'in');
@@ -123,12 +124,18 @@ export class CliManager extends EventEmitter {
 
     const found = s.launcherId ? this.resolve?.(s.launcherId) : null; // pick up edits to the launcher's env vars
     if (found) { s.env = found.env; s.launcher = found.launcher; }
-    const vars = { ...process.env, FORCE_COLOR: '1', ...parseEnvText(s.launcher?.envText) };
+    // Windows' variables as they are now (a change made in Windows reaches the next command, no restart needed)
+    s.starting = true;
+    let base;
+    try { base = await freshEnv(); } finally { s.starting = false; }
+    if (!this.sessions.has(id)) return this.info(s); // closed meanwhile
+    const vars = withVars(base, { FORCE_COLOR: '1', ...parseEnvText(s.launcher?.envText) });
     delete vars.MCDH_DATA_DIR; delete vars.MCDH_WATCH_STDIN;
     if (!('NO_COLOR' in parseEnvText(s.launcher?.envText))) delete vars.NO_COLOR;
     if (s.launcher?.port && !vars.PORT) vars.PORT = String(s.launcher.port);
 
     const { file, args, verbatim } = cliShellCommand(s.shell, line);
+    s.lastCommand = line;
     let child;
     try {
       child = spawn(file, args, { cwd: s.cwd, env: vars, windowsHide: true, windowsVerbatimArguments: !!verbatim, detached: !isWin, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -170,6 +177,23 @@ export class CliManager extends EventEmitter {
     await killTree(child.pid);
     await Promise.race([closed, new Promise((r) => setTimeout(r, 5000))]);
     return this.info(s);
+  }
+
+  /**
+   * Restarts the console's command with Windows' current variables: stops the running one (e.g. a dev server) and runs
+   * it again, or runs the last command again if nothing is running. The tab, its output and its folder stay.
+   */
+  async restart(id) {
+    const s = this.sessions.get(id);
+    if (!s) throw Object.assign(new Error('This CLI was closed'), { status: 404 });
+    const cmd = s.child ? s.command : s.lastCommand;
+    if (!cmd) {
+      this.#push(s, ['↻ Fresh start: the next command gets Windows\' current environment variables.'], 'sys');
+      return this.info(s);
+    }
+    if (s.child) await this.stop(id);
+    this.#push(s, [`↻ Restarting with fresh environment variables: ${cmd}`], 'sys');
+    return this.run(id, cmd);
   }
 
   async close(id) {

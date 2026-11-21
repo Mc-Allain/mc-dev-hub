@@ -454,6 +454,7 @@ route('POST', '/api/envs/:id/clis', ({ body, p }) => {
 route('GET', '/api/clis/:cid/logs', ({ p }) => { cliOf(p.cid); return clis.logs(p.cid); });
 route('POST', '/api/clis/:cid/run', ({ p, body }) => { cliOf(p.cid); return clis.run(p.cid, String(body.text ?? '')); });
 route('POST', '/api/clis/:cid/stop', async ({ p }) => { cliOf(p.cid); return clis.stop(p.cid); });
+route('POST', '/api/clis/:cid/restart', async ({ p }) => { cliOf(p.cid); return clis.restart(p.cid); });
 route('POST', '/api/clis/:cid/clear', ({ p }) => { cliOf(p.cid); clis.clear(p.cid); return { ok: true }; });
 route('DELETE', '/api/clis/:cid', async ({ p }) => { await clis.close(p.cid); return { ok: true }; });
 route('POST', '/api/clis/:cid/terminal', async ({ p }) => { await sys.openTerminal(cliOf(p.cid).cwd, store.state.settings.terminal); return { ok: true }; });
@@ -617,6 +618,9 @@ server.on('error', (err) => {
   else console.error(err);
   process.exit(2);
 });
+// Windows' variables at start: later reads compare against these, so a variable deleted in Windows disappears too
+sys.freshEnv().catch(() => {});
+
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`MC Dev Hub ${VERSION} running at http://localhost:${PORT}`);
   console.log(`Data: ${store.file}`);

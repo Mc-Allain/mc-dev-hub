@@ -28,6 +28,65 @@ export async function freshPath() {
 }
 
 /**
+ * Windows' environment variables as they are now (user + system, from the registry), like a newly opened terminal
+ * gets them. The hub's own process.env is frozen at its start, so without this, a variable added, changed or removed
+ * in Windows later never reaches CLI commands, launchers or terminals until the whole hub restarts.
+ * -> a copy of process.env with the registry's current values on top (and variables deleted from Windows removed)
+ */
+let envCache = null;      // { at, vars }
+let envBaseline = null;   // registry variable names when the hub started: a name gone from there was deleted
+export async function freshEnv() {
+  const base = { ...process.env };
+  if (!isWin) return base;
+  if (envCache && Date.now() - envCache.at < 2000) return withVars(base, { ...envCache.vars.set, ...Object.fromEntries(envCache.vars.del.map((k) => [k, undefined])) });
+  const read = async (key) => {
+    const r = await run('reg.exe', ['query', key], { timeout: 5000 });
+    const out = {};
+    for (const line of r.stdout.split(/\r?\n/)) {
+      const m = /^\s{4}(\S(?:.*?\S)?)\s{4}(REG_SZ|REG_EXPAND_SZ)\s{4}(.*)$/.exec(line);
+      if (m) out[m[1]] = { value: m[3], expand: m[2] === 'REG_EXPAND_SZ' };
+    }
+    return r.code === 0 ? out : null;
+  };
+  const [machine, user] = await Promise.all([read('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'), read('HKCU\\Environment')]);
+  if (!machine || !user) return base; // can't read the registry: keep what we have
+  const key = (o, name) => Object.keys(o).find((k) => k.toLowerCase() === name.toLowerCase()) ?? name; // Windows names ignore case
+  const merged = {};
+  for (const [k, v] of Object.entries(machine)) merged[k] = v;
+  for (const [k, v] of Object.entries(user)) {
+    const mk = key(merged, k);
+    if (k.toLowerCase() === 'path' && merged[mk]) merged[mk] = { value: `${merged[mk].value};${v.value}`, expand: merged[mk].expand || v.expand }; // PATH = system's, then the user's
+    else { delete merged[mk]; merged[k] = v; }
+  }
+  const set = {};
+  const lookup = (name) => { const s = set[key(set, name)]; return s ?? process.env[name]; };
+  for (const [k, v] of Object.entries(merged)) set[k] = v.value;
+  for (let pass = 0; pass < 2; pass++) { // %VAR% inside values (twice, for one level of nesting)
+    for (const [k, v] of Object.entries(merged)) if (v.expand) set[k] = set[k].replace(/%([^%]+)%/g, (all, n) => (n.toLowerCase() === k.toLowerCase() ? process.env[n] ?? all : lookup(n) ?? all));
+  }
+  // folders on the hub's own PATH that Windows' PATH doesn't list (given by whatever started the hub, or added since,
+  // e.g. Git found later) stay on it, after Windows' own
+  const pk = key(set, 'Path');
+  const listed = new Set(String(set[pk] || '').toLowerCase().split(';'));
+  const extra = (process.env.PATH || '').split(';').filter((d) => d && !listed.has(d.toLowerCase()));
+  if (extra.length) set[pk] = [set[pk], ...extra].filter(Boolean).join(';');
+  const names = Object.keys(set).map((k) => k.toLowerCase());
+  if (!envBaseline) envBaseline = { names };
+  const del = envBaseline.names.filter((n) => !names.includes(n)).map((n) => Object.keys(base).find((k) => k.toLowerCase() === n)).filter(Boolean);
+  envCache = { at: Date.now(), vars: { set, del } };
+  return freshEnv(); // apply from the cache (one code path)
+}
+/** freshEnv(), with keys merged case-insensitively onto a copy of the given variables. */
+export function withVars(vars, extra) {
+  const out = { ...vars };
+  for (const [k, v] of Object.entries(extra)) {
+    for (const old of Object.keys(out)) if (old !== k && old.toLowerCase() === k.toLowerCase()) delete out[old];
+    if (v === undefined) delete out[k]; else out[k] = v;
+  }
+  return out;
+}
+
+/**
  * Git installed while the hub runs isn't on the hub's PATH yet. Looks for it on the fresh PATH and in Git for Windows'
  * usual folders; when found, puts its folder on our PATH so every `git` call (Git tab, AI, CLI tabs) works without a restart.
  * -> the folder added, or '' (not found)
@@ -49,9 +108,10 @@ export async function adoptGit() {
 }
 
 // Fire-and-forget a program that should outlive this server.
-function launch(file, args, opts = {}) {
+async function launch(file, args, opts = {}) {
+  const env = opts.env || await freshEnv(); // a terminal or editor opened now gets Windows' variables as they are now
   return new Promise((resolve, reject) => {
-    const child = spawn(file, args, { stdio: 'ignore', detached: !isWin, windowsHide: false, ...opts });
+    const child = spawn(file, args, { stdio: 'ignore', detached: !isWin, windowsHide: false, ...opts, env });
     child.once('error', reject);
     child.once('spawn', () => { child.unref(); resolve(); });
   });

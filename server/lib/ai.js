@@ -8,7 +8,7 @@ import { EventEmitter } from 'node:events';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { isWin, run, killTree, openShellWindow, freshPath, adoptGit } from './system.js';
+import { isWin, run, killTree, openShellWindow, freshPath, adoptGit, freshEnv } from './system.js';
 
 export const AI_MODELS = [
   { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5 (default): fast, good for everyday commits' },
@@ -353,8 +353,9 @@ export class AiJobs extends EventEmitter {
 
   /** Runs Claude Code headless and read-only in the environment's folder, streaming its steps into the job log.
    *  -> { out, cost }, or null when the job was cancelled; throws (with .cost) when it fails. */
-  #ask(j, env, st, { system, schema, prompt }) {
+  async #ask(j, env, st, { system, schema, prompt }) {
     this.#log(j, 'step', `Asking ${(AI_MODELS.find((m) => m.id === j.model)?.label.split(/[:(]/)[0] || j.model).trim()} via Claude Code ${st.version}…`);
+    const baseEnv = await freshEnv(); // Windows' variables as they are now (e.g. a proxy or key set since the hub started)
     return new Promise((resolve, reject) => {
       const fail = (error, cost = null) => reject(Object.assign(new Error(error), { cost }));
       const deny = SECRET_PATTERNS.flatMap((p) => [`Read(./${p})`, `Read(./**/${p})`]);
@@ -368,7 +369,7 @@ export class AiJobs extends EventEmitter {
         '--json-schema', JSON.stringify(schema),
       ];
       const s = claudeSpawnArgs(st.path, args);
-      const child = spawn(s.file, s.args, { cwd: env.path, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' } });
+      const child = spawn(s.file, s.args, { cwd: env.path, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...baseEnv, NO_COLOR: '1' } });
       j.child = child;
       j.timer = setTimeout(() => { this.#log(j, 'error', 'Stopped: it took longer than 4 minutes.'); killTree(child.pid); }, JOB_TIMEOUT);
       child.stdin.on('error', () => {});

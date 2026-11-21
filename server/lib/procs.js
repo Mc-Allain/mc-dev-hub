@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
-import { isWin, isPortOpen, killTree } from './system.js';
+import { isWin, isPortOpen, killTree, freshEnv, withVars } from './system.js';
 
 const MAX_LINES = 5000;
 
@@ -122,14 +122,19 @@ export class ProcessManager extends EventEmitter {
     this.#push(this.#run(id), [msg], 'sys');
   }
 
-  start(env, launcher) {
+  async start(env, launcher) {
     const r = this.#run(launcher.id);
-    if (this.isActive(launcher.id)) return this.info(launcher.id);
+    if (this.isActive(launcher.id) || r.pendingStart) return this.info(launcher.id);
     if (!launcher.command) throw Object.assign(new Error('This launcher has no command yet. Edit it and add one, e.g. npm run dev'), { status: 400 });
     const cwd = launcherDir(env, launcher);
     if (!fs.existsSync(cwd)) throw Object.assign(new Error(`Working folder not found: ${cwd}`), { status: 400 });
 
-    const vars = { ...process.env, FORCE_COLOR: '1', ...parseEnvText(launcher.envText) };
+    // Windows' variables as they are now: a variable changed in Windows reaches the launcher on its next (re)start
+    r.pendingStart = true;
+    let base;
+    try { base = await freshEnv(); } finally { r.pendingStart = false; }
+    if (this.isActive(launcher.id)) return this.info(launcher.id);
+    const vars = withVars(base, { FORCE_COLOR: '1', ...parseEnvText(launcher.envText) });
     delete vars.MCDH_DATA_DIR; delete vars.MCDH_WATCH_STDIN;
     // the console renders colors; an inherited NO_COLOR only makes Node warn about the conflict
     if (!('NO_COLOR' in parseEnvText(launcher.envText))) delete vars.NO_COLOR;
@@ -183,7 +188,7 @@ export class ProcessManager extends EventEmitter {
             this.#push(r, [`↻ Restarting in 2s (attempt ${r.restarts} of 5)`], 'sys');
             setTimeout(() => {
               if (!this.isActive(r.id) && r.status === 'exited') {
-                try { this.start(r.env, r.launcher); } catch (e) { this.#push(r, [`✖ ${e.message}`], 'sys'); }
+                this.start(r.env, r.launcher).catch((e) => this.#push(r, [`✖ ${e.message}`], 'sys'));
               }
             }, 2000);
           } else {
