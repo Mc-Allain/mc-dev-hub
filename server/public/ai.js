@@ -2,7 +2,7 @@
 /* AI in the Git tab: Claude Code on this PC writes commit messages (more AI actions build on this).
  * Off until turned on in Settings; each person uses their own Claude login and picks the model. */
 
-S.ai = { status: null, jobs: new Map(), undo: new Map() }; // jobs: envId -> job snapshot (or { setup: true })
+S.ai = { status: null, jobs: new Map(), undo: new Map() }; // jobs: "envId|kind" -> job snapshot (or { kind, setup: true }), one per panel
 
 const AI_VIA = { cli: 'Claude Code CLI', npm: 'Claude Code (npm)', desktop: 'bundled with the Claude desktop app', override: 'test stand-in' };
 const aiModelName = (id) => ({ 'claude-sonnet-5-5': 'Sonnet 5.5', 'claude-opus-5-5': 'Opus 5.5' }[id] || id);
@@ -101,19 +101,24 @@ function renderAiSettings(reset = false) {
 }
 
 // ---------- Git tab ----------
+// Each AI action has its own panel: commit messages in the Commit card, branch names in the Branch card.
+const AI_CARDS = { 'commit-message': '#aiCard', 'branch-name': '#aiBranchCard' };
+const aiKey = (envId, kind) => `${envId}|${kind}`;
+const aiJob = (kind, envId = env()?.id) => S.ai.jobs.get(aiKey(envId, kind));
+/** Claude Code runs one job per environment at a time, so both buttons wait while either works. */
+const aiBusy = (envId = env()?.id) => Object.keys(AI_CARDS).some((k) => aiJob(k, envId)?.status === 'running');
+
 function aiCommitButton() {
   if (!S.ai.status?.enabled) return '';
-  const job = S.ai.jobs.get(env()?.id);
-  const running = job?.status === 'running';
-  const mine = running && job.kind !== 'branch-name';
-  return `<button class="ghost ai-btn" data-git="aiMessage" ${running ? 'disabled' : ''} title="Claude reads your changes and writes a commit message into the box. Nothing is committed.">✨ ${mine ? 'Writing…' : 'Commit message'}</button>`;
+  const mine = aiJob('commit-message')?.status === 'running';
+  const other = !mine && aiBusy();
+  return `<button class="ghost ai-btn" data-git="aiMessage" ${mine || other ? 'disabled' : ''} title="${other ? 'Waiting: Claude is naming a branch' : 'Claude reads your changes and writes a commit message into the box. Nothing is committed.'}">✨ ${mine ? 'Writing…' : 'Commit message'}</button>`;
 }
 function aiBranchButton() {
   if (!S.ai.status?.enabled) return '';
-  const job = S.ai.jobs.get(env()?.id);
-  const running = job?.status === 'running';
-  const mine = running && job.kind === 'branch-name';
-  return `<button class="ghost small ai-btn" data-git="aiBranch" ${running || S.gitBusy ? 'disabled' : ''} title="Claude reads your uncommitted changes and suggests a branch name. You confirm or edit it before the branch is created.">✨ ${mine ? 'Naming…' : 'Branch from changes'}</button>`;
+  const mine = aiJob('branch-name')?.status === 'running';
+  const other = !mine && aiBusy();
+  return `<button class="ghost small ai-btn" data-git="aiBranch" ${mine || other || S.gitBusy ? 'disabled' : ''} title="${other ? 'Waiting: Claude is writing a commit message' : 'Claude reads your uncommitted changes and suggests a branch name. You confirm or edit it before the branch is created.'}">✨ ${mine ? 'Naming…' : 'Branch from changes'}</button>`;
 }
 /** Shown only while AI is off, so people know the feature exists. */
 function aiOffNote() {
@@ -135,14 +140,19 @@ const aiBranchName = () => aiRun('branch-name');
 async function aiRun(kind) {
   const e = env();
   if (!e) return;
+  const key = aiKey(e.id, kind);
   if (!aiReady()) { await loadAiStatus(true); }
-  if (!aiReady()) { S.ai.jobs.set(e.id, { setup: true }); return renderAiCard(); }
+  if (!aiReady()) { S.ai.jobs.set(key, { kind, setup: true }); return renderAiCard(); }
+  // show it as working straight away: the server takes a moment to start Claude Code, and both buttons must wait meanwhile
+  S.ai.jobs.set(key, { kind, status: 'running', log: [], model: S.ai.status?.model, startedAt: Date.now() });
+  renderAiCard();
+  updateAiButton();
   try {
     const job = await api('POST', `/api/envs/${e.id}/ai/${kind}`);
-    S.ai.jobs.set(e.id, job);
+    if (S.ai.jobs.get(key)?.id !== job.id) S.ai.jobs.set(key, job); // live events may already have filled it in: keep those
   } catch (err) {
-    if (/^AI_/.test(err.data?.code || '')) { await loadAiStatus(true); S.ai.jobs.set(e.id, { setup: true, error: err.message }); }
-    else S.ai.jobs.set(e.id, { kind, status: 'error', error: err.message, log: [], model: S.ai.status?.model });
+    if (/^AI_/.test(err.data?.code || '')) { await loadAiStatus(true); S.ai.jobs.set(key, { kind, setup: true, error: err.message }); }
+    else S.ai.jobs.set(key, { kind, status: 'error', error: err.message, log: [], model: S.ai.status?.model });
   }
   renderAiCard();
   updateAiButton();
@@ -153,11 +163,13 @@ function aiLine(x) {
   return `<div class="ai-line ${x.kind}"><span class="ico">${ico}</span><span class="txt">${h(x.text)}</span></div>`;
 }
 
-function renderAiCard() {
-  const el = $('#aiCard');
+/** Both panels (each shows only its own kind of job). */
+function renderAiCard() { for (const kind of Object.keys(AI_CARDS)) renderAiCardOf(kind); }
+function renderAiCardOf(kind) {
+  const el = $(AI_CARDS[kind]);
   const e = env();
   if (!el || !e) return;
-  const job = S.ai.jobs.get(e.id);
+  const job = aiJob(kind);
   if (!job) { el.innerHTML = ''; el.hidden = true; return; }
   el.hidden = false;
   if (job.setup) {
@@ -171,14 +183,13 @@ function renderAiCard() {
   const secs = job.startedAt ? Math.round(((job.endedAt || Date.now()) - job.startedAt) / 1000) : 0;
   const state = running ? 'working…' : job.status === 'done' ? `done in ${secs}s` : job.status === 'cancelled' ? 'cancelled' : 'failed';
   const undo = S.ai.undo.get(e.id);
-  const branch = job.kind === 'branch-name';
-  const what = branch ? 'Branch name' : 'Commit message';
+  const branch = kind === 'branch-name';
   const doneText = branch
     ? `Suggested <code>${h(job.result?.name)}</code>${job.result?.from ? ` from <b>${h(job.result.from)}</b>` : ''}. Nothing is created until you confirm.`
     : 'Written into the message box. Edit it as you like, then press Commit.';
-  el.innerHTML = `<div class="ai-head"><b>✨ ${what} · ${h(aiModelName(job.model))}</b><span class="ai-status ${h(job.status)}">${state}</span><span class="grow"></span>
+  el.innerHTML = `<div class="ai-head"><b>✨ ${branch ? 'Branch name' : 'Commit message'} · ${h(aiModelName(job.model))}</b><span class="ai-status ${h(job.status)}">${state}</span><span class="grow"></span>
       ${running ? '<button class="ghost small" data-ai="cancel">Cancel</button>' : '<button class="plain small" data-ai="close" title="Hide">✕</button>'}</div>
-    <div class="ai-log" id="aiLog">${(job.log || []).map(aiLine).join('')}${running ? '<div class="ai-line step pending"><span class="ico">…</span><span class="txt">Claude is working</span></div>' : ''}</div>
+    <div class="ai-log">${(job.log || []).map(aiLine).join('')}${running ? '<div class="ai-line step pending"><span class="ico">…</span><span class="txt">Claude is working</span></div>' : ''}</div>
     ${job.status === 'error' ? `<div class="ai-error">✖ ${h(job.error)}</div>` : ''}
     ${!running ? `<div class="ai-foot">
       ${job.status === 'done' ? `<span class="muted small-text">${doneText}</span>` : ''}
@@ -187,36 +198,37 @@ function renderAiCard() {
       ${!branch && undo != null ? '<button class="plain small" data-ai="undo" title="Put back the message you had typed">↶ My message</button>' : ''}
       <button class="ghost small" data-ai="again">↻ ${branch ? 'Suggest another' : 'Write another'}</button>
       ${branch && job.status === 'done' ? '<button class="primary small" data-ai="create-branch">Create branch…</button>' : ''}</div>` : ''}`;
-  const log = $('#aiLog');
+  const log = $('.ai-log', el);
   if (log) log.scrollTop = log.scrollHeight;
 }
 
 function onAiEvent(x) {
-  let job = S.ai.jobs.get(x.envId);
-  if (x.type === 'start') job = x.job;
-  else if (x.type === 'log') {
-    if (!job || job.id !== x.jobId) return;
+  const kinds = Object.keys(AI_CARDS);
+  if (x.type === 'log') { // goes to whichever panel holds that job
+    const kind = kinds.find((k) => aiJob(k, x.envId)?.id === x.jobId);
+    if (!kind) return;
+    const job = aiJob(kind, x.envId);
     job.log = [...(job.log || []), x.entry];
     if (x.envId === env()?.id && S.tab === 'git') {
-      const log = $('#aiLog');
+      const log = $(`${AI_CARDS[kind]} .ai-log`);
       const pending = log?.querySelector('.pending');
       if (log) { (pending ? pending.insertAdjacentHTML('beforebegin', aiLine(x.entry)) : log.insertAdjacentHTML('beforeend', aiLine(x.entry))); log.scrollTop = log.scrollHeight; }
     }
     return;
-  } else if (x.type === 'done') {
-    job = x.job;
-    if (job.status === 'done' && job.result?.message) {
-      const prev = S.commitDraft[x.envId] || '';
-      if (prev.trim() && prev !== job.result.message) S.ai.undo.set(x.envId, prev);
-      setCommitDraft(x.envId, job.result.message);
-      if (x.envId === env()?.id) { const ta = $('#commitMsg'); if (ta) { ta.value = job.result.message; ta.focus(); } }
-      if (job.result.staged === false) { const all = $('#commitAll'); if (all && x.envId === env()?.id) all.checked = true; } // the message describes all changes
-    }
   }
-  S.ai.jobs.set(x.envId, job);
+  const job = x.job;
+  if (!job || !kinds.includes(job.kind)) return;
+  if (x.type === 'done' && job.status === 'done' && job.result?.message) {
+    const prev = S.commitDraft[x.envId] || '';
+    if (prev.trim() && prev !== job.result.message) S.ai.undo.set(x.envId, prev);
+    setCommitDraft(x.envId, job.result.message);
+    if (x.envId === env()?.id) { const ta = $('#commitMsg'); if (ta) { ta.value = job.result.message; ta.focus(); } }
+    if (job.result.staged === false) { const all = $('#commitAll'); if (all && x.envId === env()?.id) all.checked = true; } // the message describes all changes
+  }
+  S.ai.jobs.set(aiKey(x.envId, job.kind), job);
   if (x.envId === env()?.id && S.tab === 'git') {
     renderAiCard(); updateAiButton();
-    // a fresh branch name: ask right away (the card keeps a "Create branch…" button if the dialog is dismissed)
+    // a fresh branch name: ask right away (the panel keeps a "Create branch…" button if the dialog is dismissed)
     if (x.type === 'done' && job.kind === 'branch-name' && job.status === 'done') aiCreateBranch();
   }
 }
@@ -224,7 +236,7 @@ function onAiEvent(x) {
 /** Asks for the branch name (Claude's suggestion, editable), then creates and switches to it. Uncommitted changes come along. */
 async function aiCreateBranch() {
   const e = env();
-  const job = e && S.ai.jobs.get(e.id);
+  const job = e && aiJob('branch-name', e.id);
   if (!job?.result?.name || $('#confirmDialog').open) return;
   const r = job.result;
   const name = await confirmBox({
@@ -234,7 +246,7 @@ async function aiCreateBranch() {
   });
   if (!name || !name.trim() || env()?.id !== e.id) return;
   const ok = await gitAction({ action: 'newBranch', branch: name.trim() }, 'New branch');
-  if (ok) { S.ai.jobs.delete(e.id); renderAiCard(); }
+  if (ok) { S.ai.jobs.delete(aiKey(e.id, 'branch-name')); renderAiCard(); }
 }
 
 // ---------- events ----------
@@ -250,13 +262,21 @@ document.addEventListener('click', async (ev) => {
   const a = ev.target.closest('[data-ai]');
   if (!a) return;
   const e = env();
-  const job = e && S.ai.jobs.get(e.id);
+  // a button inside one of the panels acts on that panel's job
+  const kind = a.closest('[data-ai-kind]')?.dataset.aiKind || 'commit-message';
+  const job = e && aiJob(kind, e.id);
   switch (a.dataset.ai) {
-    case 'close': S.ai.jobs.delete(e.id); S.ai.undo.delete(e.id); return renderAiCard();
+    case 'close': S.ai.jobs.delete(aiKey(e.id, kind)); if (kind === 'commit-message') S.ai.undo.delete(e.id); return renderAiCard();
     case 'cancel': if (job?.id) api('POST', `/api/ai/jobs/${job.id}/cancel`).catch(fail); return;
-    case 'again': return aiRun(job?.kind === 'branch-name' ? 'branch-name' : 'commit-message');
+    case 'again': return aiRun(kind);
     case 'create-branch': return aiCreateBranch();
-    case 'recheck': case 'recheck-settings': await loadAiStatus(true); if (aiReady() && job?.setup) { S.ai.jobs.delete(e.id); renderAiCard(); toast('Claude Code is ready'); } return;
+    case 'recheck': case 'recheck-settings': {
+      await loadAiStatus(true);
+      if (aiReady() && e) for (const k of Object.keys(AI_CARDS)) if (aiJob(k, e.id)?.setup) S.ai.jobs.delete(aiKey(e.id, k));
+      renderAiCard();
+      if (aiReady() && a.dataset.ai === 'recheck') toast('Claude Code is ready');
+      return;
+    }
     case 'settings': $('#settingsBtn').click(); return;
     case 'sign-in': {
       const sh = aiShell();

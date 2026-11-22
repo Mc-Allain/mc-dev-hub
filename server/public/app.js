@@ -944,6 +944,7 @@ function renderGit() {
             ${aiBranchButton()}
           </div>
           <div class="switch-lock" id="switchLock" hidden></div>
+          <div class="ai-card" id="aiBranchCard" data-ai-kind="branch-name" hidden></div>
           <div class="sync">${sync}</div>
           <div class="quick">
             <button class="ghost" data-git="fetch" ${busy}>Fetch</button>
@@ -1000,7 +1001,7 @@ function renderGit() {
             <button class="primary" data-git="commitPush" ${busy}>Commit &amp; push</button>
           </div>
           ${aiOffNote()}
-          <div class="ai-card" id="aiCard" hidden></div>
+          <div class="ai-card" id="aiCard" data-ai-kind="commit-message" hidden></div>
         </div>
       </div>
       <div class="card">
