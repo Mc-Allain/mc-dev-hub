@@ -41,11 +41,14 @@ public partial class App : Application
             CreateTray();
             Server.StateChanged += () => Dispatcher.UIThread.Post(UpdateTray);
 
-            if (!Program.StartMinimized) _main.Show();
+            // When the hub opens by itself, the server window isn't shown first (it would only flash and hide again);
+            // it still appears if the server can't start, so the reason is visible.
+            bool hubOnStart = Settings.StartServerOnLaunch && Settings.OpenUiOnStart && !Program.StartMinimized;
+            if (!Program.StartMinimized && !hubOnStart) _main.Show();
             ListenForSecondInstance();
 
             if (Settings.StartServerOnLaunch)
-                _ = StartServerAsync(openUi: Settings.OpenUiOnStart && !Program.StartMinimized);
+                _ = StartServerAsync(openUi: hubOnStart);
         }
         base.OnFrameworkInitializationCompleted();
     }
@@ -68,6 +71,7 @@ public partial class App : Application
         if (Server.State == ServerState.Running) WebUiWindow.ServerUrl = Server.Url;
 #endif
         if (openUi && Server.State == ServerState.Running) OpenUi();
+        else if (openUi) ShowMain(); // couldn't start: show the server window with the reason
     }
 
     /// <summary>Stops the server. The web windows (launcher UI and launched sites) close first, since there's nothing left to show.</summary>
@@ -105,11 +109,20 @@ public partial class App : Application
 #if WINDOWS
         if (!forceBrowser && Settings.OpenUiIn == UiMode.AppWindow)
         {
-            WebUiWindow.Show(Server.Url, Settings, msg => Dispatcher.UIThread.Post(() => _main?.ShowNotice(msg)));
+            WebUiWindow.Show(Server.Url, Settings, msg => Dispatcher.UIThread.Post(() => { _main?.ShowNotice(msg); ShowMain(); }));
+            HideMain();
             return;
         }
 #endif
         Os.OpenUrl(Server.Url);
+        HideMain();
+    }
+
+    /// <summary>The hub is open: the server window steps aside to the tray (the server keeps running; "Launcher settings…" in the tray brings it back).</summary>
+    void HideMain()
+    {
+        if (_main == null || !_main.IsVisible) return;
+        _main.Hide();
     }
 
     public void ShowMain()
@@ -186,7 +199,8 @@ public partial class App : Application
             while (true)
             {
                 signal.WaitOne();
-                Dispatcher.UIThread.Post(ShowMain);
+                // launched again: bring up the hub itself (or the server window if the server isn't running)
+                Dispatcher.UIThread.Post(() => { if (Server.State == ServerState.Running) OpenUi(); else ShowMain(); });
             }
         })
         { IsBackground = true, Name = "SingleInstance" };
